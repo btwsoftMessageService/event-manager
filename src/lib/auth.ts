@@ -1,3 +1,5 @@
+// src/lib/auth.ts
+
 const KEY = "event_manager_authed";
 
 export function isAuthedClient(): boolean {
