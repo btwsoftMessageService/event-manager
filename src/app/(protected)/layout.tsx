@@ -1,13 +1,14 @@
-import type { ReactNode } from "react";
+// src/app/(protected)/layout.tsx
+
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 
-export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+export default function ProtectedLayout({children}: { children: React.ReactNode }) {
     return (
         <div className="flex h-screen bg-gray-50 text-gray-900">
-            <Sidebar />
+            <Sidebar/>
             <div className="flex flex-1 flex-col">
-                <Topbar />
+                <Topbar/>
                 <main className="flex-1 p-6 bg-white">
                     {children}
                 </main>

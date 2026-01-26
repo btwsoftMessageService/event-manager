@@ -1,8 +1,9 @@
+// src/components/Topbar.tsx
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { isAuthedClient } from "@/lib/auth";
+import {useEffect} from "react";
+import {useRouter} from "next/navigation";
+import {isAuthedClient} from "@/lib/auth";
 
 export default function Topbar() {
     const router = useRouter();
