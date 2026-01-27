@@ -68,15 +68,31 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script: |
             set -e
+
+          # root에서 nvm 로드 (non-interactive ssh에서도 보장)
+            export NVM_DIR="/root/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            
+          # Node 20 사용
+            nvm use 20
+            
+          # 디버그
+            which node
+            node -v
+            which npm
+            npm -v
+            which pm2
+            pm2 -v
+            
             cd "${{ secrets.DEPLOY_PATH }}"
             npm ci --omit=dev
-
+            
             if pm2 describe event-manager > /dev/null 2>&1; then
               pm2 restart event-manager
             else
               pm2 start "npm run start" --name event-manager
             fi
-
+            
             pm2 save
 
 # end
