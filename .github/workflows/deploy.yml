@@ -27,6 +27,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
 
       - name: Prepare remote directory
         uses: appleboy/ssh-action@v1.0.3

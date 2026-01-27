@@ -1,16 +1,17 @@
 // src/app/(protected)/events/[eventId]/checkin/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import {useEffect, useMemo, useRef, useState} from "react";
+import {useParams} from "next/navigation";
+import type {Html5Qrcode} from "html5-qrcode";
 
 type ScanState = "idle" | "starting" | "scanning" | "stopping" | "error";
 
 export default function CheckinPage() {
-    const { eventId } = useParams<{ eventId: string }>();
+    const {eventId} = useParams<{ eventId: string }>();
 
     const readerId = "qr-reader";
-    const qrRef = useRef<any>(null);
+    const qrRef = useRef<Html5Qrcode | null>(null);
 
     const [state, setState] = useState<ScanState>("idle");
     const [error, setError] = useState<string>("");
@@ -23,6 +24,8 @@ export default function CheckinPage() {
     const canStop = useMemo(() => state === "scanning", [state]);
 
     async function startScan() {
+        if (!canStart) return;
+
         setError("");
         setState("starting");
 
@@ -31,22 +34,23 @@ export default function CheckinPage() {
             const mod = await import("html5-qrcode");
             const Html5QrcodeCtor = mod.Html5Qrcode;
 
-            // 이미 인스턴스가 있으면 재사용, 없으면 생성
-            if (!qrRef.current) {
-                qrRef.current = new Html5QrcodeCtor(readerId);
-            }
+            // 로컬 변수로 인스턴스 확정
+            const qr: Html5Qrcode = qrRef.current ?? new Html5QrcodeCtor(readerId);
+
+            // ref에도 저장
+            qrRef.current = qr;
 
             // 카메라 목록에서 "environment" 우선 선택 (모바일 후면)
             const config = {
                 fps: 10,
-                qrbox: { width: 260, height: 260 },
+                qrbox: {width: 260, height: 260},
                 aspectRatio: 1.0,
             };
 
-            await qrRef.current.start(
-                { facingMode: "environment" },
+            await qr.start(
+                {facingMode: "environment"},
                 config,
-                (decodedText) => {
+                (decodedText: string) => {
                     // QR 인식 성공
                     const now = new Date();
                     const time = now.toLocaleString("ko-KR", {
@@ -57,14 +61,15 @@ export default function CheckinPage() {
                     });
 
                     setLastText(decodedText);
-                    setHistory((prev) => [{ text: decodedText, time }, ...prev].slice(0, 20));
+                    setHistory((prev) => [{text: decodedText, time}, ...prev].slice(0, 20));
 
                     // ✅ 프로토타입 체크인 처리
                     // 여기서 실제론 API 호출: POST /api/checkin { eventId, qr: decodedText }
-                    console.log("CHECKIN", { eventId, decodedText });
+                    console.log("CHECKIN", {eventId, decodedText});
                 },
                 // onScanFailure는 너무 자주 호출돼서 기본은 무시(성능)
-                () => {}
+                () => {
+                }
             );
 
             setState("scanning");
@@ -78,17 +83,18 @@ export default function CheckinPage() {
     }
 
     async function stopScan() {
-        if (!qrRef.current) return;
+        const qr = qrRef.current;
+        if (!qr) return;
 
         setState("stopping");
         setError("");
 
         try {
             // stop()은 보통 Promise
-            await qrRef.current.stop();
+            await qr.stop();
 
             // clear()는 버전에 따라 Promise가 아닐 수 있음 → await 금지
-            qrRef.current.clear();
+            qr.clear();
 
             setState("idle");
         } catch (e: any) {
@@ -101,10 +107,13 @@ export default function CheckinPage() {
     useEffect(() => {
         return () => {
             (async () => {
+                const qr = qrRef.current;
+                if (!qr) return;
+
                 try {
                     if (qrRef.current) {
-                        await qrRef.current.stop();
-                        qrRef.current.clear();
+                        await qr.stop();
+                        qr.clear();
                     }
                 } catch {
                     // ignore
@@ -157,8 +166,8 @@ export default function CheckinPage() {
                 <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     {error}
                     <div className="mt-2 text-xs text-red-600">
-                        • 로컬에서는 브라우저/OS에 따라 카메라 권한 이슈가 있을 수 있습니다.<br />
-                        • 운영(HTTPS) 환경에서 가장 안정적으로 동작합니다.<br />
+                        • 로컬에서는 브라우저/OS에 따라 카메라 권한 이슈가 있을 수 있습니다.<br/>
+                        • 운영(HTTPS) 환경에서 가장 안정적으로 동작합니다.<br/>
                         • 다른 앱이 카메라를 사용중이면 실패할 수 있습니다.
                     </div>
                 </div>
@@ -174,7 +183,7 @@ export default function CheckinPage() {
 
                     <div className="mt-4 overflow-hidden rounded-lg border bg-black">
                         {/* html5-qrcode가 여기에 카메라 뷰를 렌더 */}
-                        <div id={readerId} className="w-full" />
+                        <div id={readerId} className="w-full"/>
                     </div>
 
                     <div className="mt-4 rounded-lg bg-gray-50 p-3">
