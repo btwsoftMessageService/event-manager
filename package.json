@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "dotenv -e .env.local -- next dev -H 0.0.0.0",
     "build": "next build",
-    "start": "dotenv -e .env.production -- next start",
+    "start": "next start -p 51001",
     "lint": "eslint"
   },
   "dependencies": {
