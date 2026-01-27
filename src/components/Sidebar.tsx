@@ -8,7 +8,7 @@ import {logoutClient} from "@/lib/auth";
 function NavItem({
                      href,
                      label,
-                     isActive,
+                     active,
                  }: {
     href: string;
     label: string;
@@ -19,9 +19,7 @@ function NavItem({
             href={href}
             className={[
                 "block rounded-lg px-4 py-3 text-base font-medium",
-                isActive
-                    ? "bg-black text-white"
-                    : "text-gray-900 hover:bg-gray-100",
+                active ? "bg-black text-white" : "text-gray-900 hover:bg-gray-100",
             ].join(" ")}
         >
             {label}
