@@ -3,7 +3,6 @@
 
 import {useEffect, useMemo, useState} from "react";
 
-/** page.tsx와 동일한 Row 타입 */
 export type Row = Record<string, string>;
 
 type DbParticipant = {
@@ -29,11 +28,6 @@ function normalizePhoneKey(v: string) {
  * - TODO: 실제 DB 붙이면 여기만 API로 교체
  */
 async function loadDbParticipants(): Promise<DbParticipant[]> {
-    // 실제 DB 붙이면 여기서 API 호출로 교체하세요.
-    // 예:
-    // const res = await fetch(`/api/participants?scope=global`, { cache: "no-store" });
-    // if (res.ok) return await res.json();
-
     try {
         const raw = localStorage.getItem(GLOBAL_PARTICIPANTS_STORAGE_KEY);
         if (!raw) return [];
@@ -54,6 +48,15 @@ async function loadDbParticipants(): Promise<DbParticipant[]> {
     }
 }
 
+/** 중복 제거 키: email 우선, 없으면 name+phone */
+function makeKey(r: Row) {
+    const email = (r["email"] ?? "").trim();
+    if (email) return `email:${normalizeEmailKey(email)}`;
+    const name = (r["name"] ?? "").trim().toLowerCase();
+    const phone = normalizePhoneKey(r["phone"] ?? "");
+    return `name:${name}|phone:${phone}`;
+}
+
 export default function ParticipantPickerModal({
                                                    open,
                                                    onClose,
@@ -66,12 +69,13 @@ export default function ParticipantPickerModal({
     onAddRows: (rowsToAdd: Row[]) => void;
 }) {
     const [loading, setLoading] = useState(false);
-    const [err, setErr] = useState("");
+    const [err, setErr] = useState<string>("");
 
     const [dbParticipants, setDbParticipants] = useState<DbParticipant[]>([]);
     const [q, setQ] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+    // 모달 열릴 때 로드
     useEffect(() => {
         if (!open) return;
 
@@ -130,31 +134,20 @@ export default function ParticipantPickerModal({
             phone: p.phone ?? "",
         }));
 
-        // 한번 더 중복 제거하고 page로 넘김
+        // 기존 + 신규 merge 후 dedup → 그중 "신규"만 page로 넘김
+        const existingKeys = new Set(existingRows.map(makeKey));
         const merged = [...existingRows, ...mapped];
+
         const seen = new Set<string>();
         const dedup: Row[] = [];
-
-        const keyOf = (r: Row) => {
-            const email = (r["email"] ?? "").trim();
-            if (email) return `email:${normalizeEmailKey(email)}`;
-            const name = (r["name"] ?? "").trim().toLowerCase();
-            const phone = normalizePhoneKey(r["phone"] ?? "");
-            return `name:${name}|phone:${phone}`;
-        };
-
         for (const r of merged) {
-            const key = keyOf(r);
+            const key = makeKey(r);
             if (seen.has(key)) continue;
             seen.add(key);
             dedup.push(r);
         }
 
-        // existingRows 포함 dedup 결과 중에서 “기존에 없던 것”만 onAddRows로 넘기고 싶다면:
-        // 지금은 단순하게 mapped만 넘겨도 되지만, page 쪽에서 또 dedup하면 중복 없이 유지됨.
-        // 여기서는 안전하게 "새로 추가된 row들"만 추려서 전달:
-        const existingKeys = new Set(existingRows.map(keyOf));
-        const toAdd = dedup.filter((r) => !existingKeys.has(keyOf(r)));
+        const toAdd = dedup.filter((r) => !existingKeys.has(makeKey(r)));
 
         onAddRows(toAdd);
         onClose();
@@ -267,9 +260,7 @@ export default function ParticipantPickerModal({
                         </table>
                     </div>
 
-                    <div className="mt-3 text-xs text-gray-500">
-                        * 중복 제거 기준: email 우선, 없으면 name+phone
-                    </div>
+                    <div className="mt-3 text-xs text-gray-500">* 중복 제거 기준: email 우선, 없으면 name+phone</div>
                 </div>
             </div>
         </div>
