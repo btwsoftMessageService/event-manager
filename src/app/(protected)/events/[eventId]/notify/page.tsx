@@ -1,15 +1,13 @@
-// src/app/(protected)/events/[eventId]/notify/page.tsx
 "use client";
 
 import {useMemo, useRef, useState} from "react";
 import {useParams} from "next/navigation";
 import * as XLSX from "xlsx";
+import ParticipantPickerModal, {type Row} from "./_components/ParticipantPickerModal";
 
 /* =========================
-   타입 & 상수
+   상수
 ========================= */
-type Row = Record<string, string>;
-
 const ACCEPT =
     ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
 
@@ -52,12 +50,7 @@ function buildSampleWorkbook() {
         header: ["name", "email", "company", "phone"],
     });
 
-    ws["!cols"] = [
-        {wch: 12},
-        {wch: 24},
-        {wch: 18},
-        {wch: 16},
-    ];
+    ws["!cols"] = [{wch: 12}, {wch: 24}, {wch: 18}, {wch: 16}];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "participants");
@@ -101,11 +94,13 @@ export default function NotifyPage() {
     const [rows, setRows] = useState<Row[]>([]);
     const [error, setError] = useState("");
 
-    const [template, setTemplate] = useState("invite");
     const [subject, setSubject] = useState("[Event] 행사 안내");
     const [content, setContent] = useState(
         "안녕하세요, {{name}}님.\n\n행사에 초대드립니다.\n- 행사 ID: {{eventId}}\n\n감사합니다."
     );
+
+    // 모달 open/close만 관리
+    const [pickerOpen, setPickerOpen] = useState(false);
 
     /* ===== 계산 ===== */
     const emailColumn = useMemo(() => {
@@ -140,7 +135,7 @@ export default function NotifyPage() {
             const {rows, headers} = await parseFile(file);
             setHeaders(headers);
             setRows(rows);
-        } catch (e: any) {
+        } catch {
             setError("파일 파싱에 실패했습니다.");
         }
     };
@@ -161,55 +156,46 @@ export default function NotifyPage() {
         downloadBlob(blob, "participants_sample.xlsx");
     };
 
-    /* =========================
-       Render
-    ========================= */
+    /* ========================= Render ========================= */
     return (
         <main className="p-6 text-gray-900">
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
                 <div>
                     <h1 className="text-2xl font-semibold text-black">Notify</h1>
                     <p className="mt-1 text-sm text-gray-700">eventId: {eventId}</p>
                 </div>
-                <button
-                    onClick={downloadSample}
-                    className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-100"
-                >
-                    샘플 엑셀 다운로드
-                </button>
             </div>
 
             {/* 업로드 */}
             <section className="mt-6 grid gap-6 lg:grid-cols-2">
                 <div className="rounded-xl border bg-white p-4">
-                    <div
-                        onDragOver={(e) => {
-                            e.preventDefault();
-                            setDragOver(true);
-                        }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={onDrop}
-                        className={`flex min-h-[160px] flex-col items-center justify-center rounded-lg border-2 border-dashed ${
-                            dragOver ? "border-black bg-gray-50" : "border-gray-300"
-                        }`}
-                    >
+                    <div onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOver(true);
+                    }}
+                         onDragLeave={() => setDragOver(false)}
+                         onDrop={onDrop}
+                         className={`flex min-h-[160px] flex-col items-center justify-center rounded-lg border-2 border-dashed ${
+                             dragOver ? "border-black bg-gray-50" : "border-gray-300"
+                         }`}>
                         <p className="font-medium">엑셀/CSV 파일 드래그 업로드</p>
                         <p className="mt-1 text-sm text-gray-600">.xlsx / .xls / .csv</p>
 
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="mt-4 rounded-lg bg-black px-4 py-2 text-sm text-white"
-                        >
+                        <button onClick={() => fileInputRef.current?.click()}
+                                className="mt-4 rounded-lg bg-black px-4 py-2 text-sm text-white">
                             파일 선택
                         </button>
 
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept={ACCEPT}
-                            onChange={(e) => e.target.files && handleFile(e.target.files[0])}
-                            className="hidden"
-                        />
+                        <button onClick={downloadSample}
+                                className="mt-2 rounded-lg border px-4 py-2 text-sm hover:bg-gray-100">
+                            샘플 엑셀 다운로드
+                        </button>
+
+                        <input ref={fileInputRef}
+                               type="file"
+                               accept={ACCEPT}
+                               onChange={(e) => e.target.files && handleFile(e.target.files[0])}
+                               className="hidden"/>
 
                         {fileName && <p className="mt-2 text-sm">업로드: {fileName}</p>}
                         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
@@ -221,32 +207,22 @@ export default function NotifyPage() {
                     <h2 className="font-semibold">메일 템플릿</h2>
 
                     <label className="mt-4 block text-sm">제목</label>
-                    <input
-                        value={subject}
-                        onChange={(e) => setSubject(e.target.value)}
-                        className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                    />
+                    <input value={subject}
+                           onChange={(e) => setSubject(e.target.value)}
+                           className="mt-1 w-full rounded border px-3 py-2 text-sm"/>
 
                     <label className="mt-4 block text-sm">내용</label>
-                    <textarea
-                        value={content}
-                        onChange={(e) => setContent(e.target.value)}
-                        className="mt-1 h-40 w-full rounded border px-3 py-2 text-sm"
-                    />
+                    <textarea value={content}
+                              onChange={(e) => setContent(e.target.value)}
+                              className="mt-1 h-40 w-full rounded border px-3 py-2 text-sm"/>
 
-                    <button
-                        disabled={validEmailCount === 0}
-                        onClick={() =>
-                            alert(
-                                `발송 요청 (프로토타입)\n- eventId: ${eventId}\n- 대상: ${validEmailCount}`
-                            )
-                        }
-                        className={`mt-6 w-full rounded px-4 py-2 text-sm ${
-                            validEmailCount === 0
-                                ? "bg-gray-200 text-gray-500"
-                                : "bg-black text-white"
-                        }`}
-                    >
+                    <button disabled={validEmailCount === 0}
+                            onClick={() =>
+                                alert(`발송 요청 (프로토타입)\n- eventId: ${eventId}\n- 대상: ${validEmailCount}`)
+                            }
+                            className={`mt-6 w-full rounded px-4 py-2 text-sm ${
+                                validEmailCount === 0 ? "bg-gray-200 text-gray-500" : "bg-black text-white"
+                            }`}>
                         발송 요청
                     </button>
                 </div>
@@ -254,7 +230,14 @@ export default function NotifyPage() {
 
             {/* 미리보기 */}
             <section className="mt-6 rounded-xl border bg-white p-4">
-                <h2 className="font-semibold">참여자 미리보기</h2>
+                <div className="flex items-center justify-between">
+                    <h2 className="font-semibold">참여자 미리보기</h2>
+
+                    <button onClick={() => setPickerOpen(true)}
+                            className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-100">
+                        참여자 추가하기
+                    </button>
+                </div>
 
                 {rows.length === 0 ? (
                     <p className="mt-2 text-sm text-gray-600">데이터 없음</p>
@@ -283,6 +266,23 @@ export default function NotifyPage() {
                     </table>
                 )}
             </section>
+
+            {/* 모달 컴포넌트 */}
+            <ParticipantPickerModal
+                open={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                existingRows={rows}
+                onAddRows={(rowsToAdd) => {
+                    if (rowsToAdd.length === 0) return;
+
+                    const baseHeaders = ["name", "email", "company", "phone"];
+                    const nextHeaders =
+                        headers.length === 0 ? baseHeaders : Array.from(new Set([...headers, ...baseHeaders]));
+
+                    setHeaders(nextHeaders);
+                    setRows((prev) => [...prev, ...rowsToAdd]);
+                }}
+            />
         </main>
     );
 }
