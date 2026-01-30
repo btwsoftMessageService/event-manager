@@ -30,7 +30,7 @@ export default function CheckinPage() {
         setState("starting");
 
         try {
-            // ✅ Next.js/SSR 이슈 방지: 동적 import
+            // Next.js/SSR 이슈 방지: 동적 import
             const mod = await import("html5-qrcode");
             const Html5QrcodeCtor = mod.Html5Qrcode;
 
@@ -63,7 +63,7 @@ export default function CheckinPage() {
                     setLastText(decodedText);
                     setHistory((prev) => [{text: decodedText, time}, ...prev].slice(0, 20));
 
-                    // ✅ 프로토타입 체크인 처리
+                    // 프로토타입 체크인 처리
                     // 여기서 실제론 API 호출: POST /api/checkin { eventId, qr: decodedText }
                     console.log("CHECKIN", {eventId, decodedText});
                 },
@@ -136,27 +136,23 @@ export default function CheckinPage() {
                 </div>
 
                 <div className="flex gap-2">
-                    <button
-                        onClick={startScan}
-                        disabled={!canStart}
-                        className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                            canStart
-                                ? "bg-black text-white hover:bg-gray-800"
-                                : "bg-gray-200 text-gray-500 cursor-not-allowed"
-                        }`}
-                    >
+                    <button onClick={startScan}
+                            disabled={!canStart}
+                            className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                                canStart
+                                    ? "bg-black text-white hover:bg-gray-800"
+                                    : "bg-gray-200 text-gray-500 cursor-not-allowed"
+                            }`}>
                         카메라 시작
                     </button>
 
-                    <button
-                        onClick={stopScan}
-                        disabled={!canStop}
-                        className={`rounded-lg border px-4 py-2 text-sm font-medium ${
-                            canStop
-                                ? "border-gray-300 text-gray-900 hover:bg-gray-100"
-                                : "border-gray-200 text-gray-400 cursor-not-allowed"
-                        }`}
-                    >
+                    <button onClick={stopScan}
+                            disabled={!canStop}
+                            className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+                                canStop
+                                    ? "border-gray-300 text-gray-900 hover:bg-gray-100"
+                                    : "border-gray-200 text-gray-400 cursor-not-allowed"
+                            }`}>
                         카메라 종료
                     </button>
                 </div>
@@ -229,13 +225,11 @@ export default function CheckinPage() {
                         </div>
                     )}
 
-                    <button
-                        onClick={() => {
-                            setHistory([]);
-                            setLastText("");
-                        }}
-                        className="mt-4 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100"
-                    >
+                    <button onClick={() => {
+                        setHistory([]);
+                        setLastText("");
+                    }}
+                            className="mt-4 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100">
                         로그 초기화
                     </button>
                 </div>
