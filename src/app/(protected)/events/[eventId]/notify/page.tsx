@@ -129,16 +129,17 @@ export default function NotifyPage() {
     const [fileName, setFileName] = useState("");
     const [error, setError] = useState("");
 
-    // ✅ 발송대상(추가한 사람들만) === 발송 대상자
+    // 발송대상(추가한 사람들만) === 발송 대상자
     const [targets, setTargets] = useState<Target[]>([]);
 
-    // ✅ 행사 참여자(사전 등록된 참여자) 목록
+    // 행사 참여자(사전 등록된 참여자) 목록
     const [headers, setHeaders] = useState<string[]>([]);
     const [rows, setRows] = useState<Row[]>([]);
 
     // 수동 추가 폼(개발/운영 편의)
     const [manualEmail, setManualEmail] = useState("");
     const [manualName, setManualName] = useState("");
+    const [manualEmailError, setManualEmailError] = useState<string>("");
 
     const [template, setTemplate] = useState("invite");
     const [subject, setSubject] = useState("[Event] 행사 안내");
@@ -312,9 +313,15 @@ export default function NotifyPage() {
             return;
         }
 
+        if (targetEmailSet.has(normalizeEmail(email))) {
+            setManualEmailError("이미 발송 대상자에 추가된 이메일입니다.");
+            return;
+        }
+
         addTarget({email, name});
-        setManualEmail("");
         setManualName("");
+        setManualEmail("");
+        setManualEmailError("");
     };
 
     const removeTarget = (id: string) => {
@@ -467,13 +474,46 @@ export default function NotifyPage() {
                         <div className="mt-1 flex gap-2">
                             <input
                                 value={manualEmail}
-                                onChange={(e) => setManualEmail(e.target.value)}
-                                className="w-full rounded border px-3 py-2 text-sm"
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setManualEmail(v);
+
+                                    const trimmed = v.trim();
+                                    if (trimmed.length === 0) {
+                                        setManualEmailError("");
+                                        return;
+                                    }
+
+                                    if (!isEmail(trimmed)) {
+                                        setManualEmailError("이메일 형식이 올바르지 않습니다.");
+                                        return;
+                                    }
+
+                                    if (targetEmailSet.has(normalizeEmail(trimmed))) {
+                                        setManualEmailError("이미 발송 대상자에 추가된 이메일입니다.");
+                                        return;
+                                    }
+
+                                    setManualEmailError("");
+                                }}
+                                className={`w-full rounded border px-3 py-2 text-sm ${
+                                    manualEmailError ? "border-red-500" : ""
+                                }`}
                                 placeholder="hong@example.com"
                             />
+
+                            {manualEmailError && (
+                                <p className="mt-1 text-xs text-red-600">{manualEmailError}</p>
+                            )}
+
                             <button
                                 onClick={addManualTarget}
-                                className="shrink-0 rounded-lg bg-black px-4 py-2 text-sm text-white"
+                                disabled={manualEmail.trim().length === 0 || manualEmailError.length > 0}
+                                className={`shrink-0 rounded-lg px-4 py-2 text-sm text-white ${
+                                    manualEmail.trim().length === 0 || manualEmailError.length > 0
+                                        ? "bg-gray-200 text-gray-500"
+                                        : "bg-black"
+                                }`}
                             >
                                 추가
                             </button>
