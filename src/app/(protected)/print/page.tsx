@@ -2,6 +2,7 @@
 
 import {useEffect, useMemo, useState} from "react";
 import QRCode from "qrcode";
+import BadgePrintClient from "./BadgePrintClient";
 
 type EventItem = {
     id: string;
@@ -23,7 +24,7 @@ type Participant = {
 
 const EVENTS_KEY = "event-manager:events:v1";
 const PARTICIPANTS_KEY_PREFIX = "event-manager:participants:";
-const CHECKINS_KEY_PREFIX = "event-manager:checkins:"; // 체크인 저장(프로토타입)
+const CHECKINS_KEY_PREFIX = "event-manager:checkins:"; // 체크인 저장
 
 type SizePreset = {
     key: string;
@@ -566,7 +567,7 @@ export default function PrintPage() {
                     </div>
 
                     <div>
-                        <label className="text-sm font-medium text-gray-700">명찰 사이즈</label>
+                        <label className="text-sm font-medium text-gray-700">명찰 템플릿</label>
                         <select
                             value={presetKey}
                             onChange={(e) => setPresetKey(e.target.value)}
