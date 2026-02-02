@@ -5,23 +5,17 @@ import Link from "next/link";
 import {usePathname, useRouter} from "next/navigation";
 import {logoutClient} from "@/lib/auth";
 
-function NavItem({
-                     href,
-                     label,
-                     active,
-                 }: {
+function NavItem({href, label, active,}: {
     href: string;
     label: string;
     active: boolean;
 }) {
     return (
-        <Link
-            href={href}
-            className={[
-                "block rounded-lg px-4 py-3 text-base font-medium",
-                active ? "bg-black text-white" : "text-gray-900 hover:bg-gray-100",
-            ].join(" ")}
-        >
+        <Link href={href}
+              className={[
+                  "block rounded-lg px-4 py-3 text-base font-medium",
+                  active ? "bg-black text-white" : "text-gray-900 hover:bg-gray-100",
+              ].join(" ")}>
             {label}
         </Link>
     );
@@ -50,6 +44,7 @@ export default function Sidebar() {
             <nav className="mt-6 space-y-2">
                 <NavItem href="/events" label="Events" active={isEvents}/>
                 <NavItem href="/participants" label="Participants" active={pathname.startsWith("/participants")}/>
+                <NavItem href="/print" label="Print" active={pathname.startsWith("/print")}/>
                 <NavItem href="/settings" label="Settings" active={pathname.startsWith("/settings")}/>
             </nav>
 
