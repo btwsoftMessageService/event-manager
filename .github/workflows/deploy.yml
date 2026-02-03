@@ -1,96 +1,45 @@
-name: Deploy to Naver Cloud (Ubuntu)
+name: Deploy Front (event-manager)
 
 on:
   push:
-    branches: ["main"]
-
-concurrency:
-  group: deploy-main
-  cancel-in-progress: true
+    branches: [ "main" ]
+    paths:
+      - "event-manager/**"
+      - ".github/workflows/deploy-front.yml"
 
 jobs:
-  deploy:
+  build-push-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
         with:
-          node-version: "20"
-          cache: "npm"
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Install deps
-        run: npm ci
+      - name: Build & Push (front)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./event-manager
+          push: true
+          tags: |
+            btwpkh/event-manager:latest
+            btwpkh/event-manager:${{ github.sha }}
 
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-
-      - name: Prepare remote directory
+      - name: Deploy to Server (tenant-1)
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            set -e
-            mkdir -p "${{ secrets.DEPLOY_PATH }}"
-
-      - name: Rsync files to server
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          PORT: ${{ secrets.DEPLOY_PORT || 22 }}
-          PATH_ON_SERVER: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          set -e
-          echo "$KEY" > key.pem
-          chmod 600 key.pem
-
-          rsync -az --delete \
-            -e "ssh -i key.pem -p $PORT -o StrictHostKeyChecking=no" \
-            package.json package-lock.json next.config.* \
-            public .next src \
-            $USER@$HOST:$PATH_ON_SERVER/
-
-      - name: Install prod deps & Restart with PM2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            set -e
-
-            # root에서 nvm 로드 (non-interactive ssh에서도 보장)
-            export NVM_DIR="/root/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-            # Node 20 사용
-            nvm use 20
-
-            # 디버그
-            which node
-            node -v
-            which npm
-            npm -v
-            which pm2
-            pm2 -v
-
-            cd "${{ secrets.DEPLOY_PATH }}"
-            npm ci --omit=dev
-
-            if pm2 describe event-manager > /dev/null 2>&1; then
-              pm2 restart event-manager
-            else
-              pm2 start "npm run start" --name event-manager
-            fi
-
-            pm2 save
+            cd /service/event-manager/tenants/tenant-1
+            docker compose pull
+            docker compose up -d
+            docker image prune -f
