@@ -4,8 +4,9 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "event-manager/**"
-      - ".github/workflows/deploy-front.yml"
+      - "**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
 
 jobs:
   build-push-deploy:
@@ -23,11 +24,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & Push (front)
+      - name: Build & Push (multi-arch)
         uses: docker/build-push-action@v6
         with:
-          context: ./event-manager
+          context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             btwpkh/event-manager:latest
             btwpkh/event-manager:${{ github.sha }}
