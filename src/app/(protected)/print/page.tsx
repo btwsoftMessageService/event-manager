@@ -2,7 +2,6 @@
 
 import {useEffect, useMemo, useState} from "react";
 import QRCode from "qrcode";
-import BadgePrintClient from "./BadgePrintClient";
 
 type EventItem = {
     id: string;
@@ -568,11 +567,9 @@ export default function PrintPage() {
 
                     <div>
                         <label className="text-sm font-medium text-gray-700">명찰 템플릿</label>
-                        <select
-                            value={presetKey}
-                            onChange={(e) => setPresetKey(e.target.value)}
-                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                        >
+                        <select value={presetKey}
+                                onChange={(e) => setPresetKey(e.target.value)}
+                                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10">
                             {PRESETS.map((p) => (
                                 <option key={p.key} value={p.key}>
                                     {p.label}
