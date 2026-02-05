@@ -1,6 +1,7 @@
+// src/app/(protected)/print/badge/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import Link from "next/link";
 
 type FieldType = "name" | "company" | "title";
@@ -44,9 +45,9 @@ const DEFAULTS: BadgeDesignV2 = {
     border: true,
     accent: "#111111",
     fields: {
-        name: { x: 24, y: 32, w: 220, h: 48, fontSize: 28, fontWeight: 800, align: "left", visible: true },
-        company: { x: 24, y: 90, w: 220, h: 28, fontSize: 14, fontWeight: 600, align: "left", visible: true },
-        title: { x: 24, y: 118, w: 220, h: 28, fontSize: 13, fontWeight: 500, align: "left", visible: true },
+        name: {x: 24, y: 32, w: 220, h: 48, fontSize: 28, fontWeight: 800, align: "left", visible: true},
+        company: {x: 24, y: 90, w: 220, h: 28, fontSize: 14, fontWeight: 600, align: "left", visible: true},
+        title: {x: 24, y: 118, w: 220, h: 28, fontSize: 13, fontWeight: 500, align: "left", visible: true},
     },
 };
 
@@ -64,12 +65,25 @@ export default function BadgeBuilderPage() {
     const canvasW = useMemo(() => Math.round(design.widthMm * scale), [design.widthMm]);
     const canvasH = useMemo(() => Math.round(design.heightMm * scale), [design.heightMm]);
 
+    const MM_MIN_W = 50;
+    const MM_MIN_H = 30;
+
+    // 최대 사이즈 제한 (원하는 값으로 조정)
+    const MM_MAX_W = 120;
+    const MM_MAX_H = 80;
+
+    // 입력 step
+    const MM_STEP = 1;
+
     useEffect(() => {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return;
             const parsed = JSON.parse(raw) as BadgeDesignV2;
-            if (parsed?.version === 2) setDesign({ ...DEFAULTS, ...parsed, fields: { ...DEFAULTS.fields, ...parsed.fields } });
+            if (parsed?.version === 2) setDesign({
+                ...DEFAULTS, ...parsed,
+                fields: {...DEFAULTS.fields, ...parsed.fields}
+            });
         } catch {
             // ignore
         }
@@ -116,7 +130,7 @@ export default function BadgeBuilderPage() {
             field,
             startX: e.clientX,
             startY: e.clientY,
-            orig: { x: f.x, y: f.y, w: f.w, h: f.h },
+            orig: {x: f.x, y: f.y, w: f.w, h: f.h},
         };
     };
 
@@ -135,7 +149,7 @@ export default function BadgeBuilderPage() {
             field,
             startX: e.clientX,
             startY: e.clientY,
-            orig: { x: f.x, y: f.y, w: f.w, h: f.h },
+            orig: {x: f.x, y: f.y, w: f.w, h: f.h},
         };
     };
 
@@ -249,7 +263,7 @@ export default function BadgeBuilderPage() {
                 ...prev,
                 fields: {
                     ...prev.fields,
-                    [d.field]: { ...f, x, y, w, h },
+                    [d.field]: {...f, x, y, w, h},
                 },
             };
         });
@@ -265,15 +279,18 @@ export default function BadgeBuilderPage() {
             ...p,
             fields: {
                 ...p.fields,
-                [field]: { ...p.fields[field], ...patch },
+                [field]: {...p.fields[field], ...patch},
             },
         }));
     };
 
     const presets = [
-        { label: "90×55", w: 90, h: 55 },
-        { label: "100×70", w: 100, h: 70 },
-        { label: "Custom", w: design.widthMm, h: design.heightMm },
+        {label: "90×55", w: 90, h: 55},
+        {label: "100×70", w: 100, h: 70},
+        {label: "85×54(카드형)", w: 85, h: 54},
+        {label: "95×60", w: 95, h: 60},
+        {label: "88×62", w: 88, h: 62},
+        {label: "Custom", w: design.widthMm, h: design.heightMm},
     ] as const;
 
     const sampleText: Record<FieldType, string> = {
@@ -291,20 +308,24 @@ export default function BadgeBuilderPage() {
                 </div>
 
                 <div className="flex gap-2">
-                    <Link href="/print" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <Link href="/print"
+                          className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                         Print로 이동
                     </Link>
-                    <button onClick={reset} className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button onClick={reset}
+                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                         기본값
                     </button>
-                    <button onClick={save} className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">
+                    <button onClick={save}
+                            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">
                         저장
                     </button>
                 </div>
             </div>
 
             {info ? (
-                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">{info}</div>
+                <div
+                    className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">{info}</div>
             ) : null}
 
             <section className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -316,10 +337,16 @@ export default function BadgeBuilderPage() {
                     <div className="mt-4">
                         <div className="text-sm font-medium text-gray-700">명찰 사이즈 (mm)</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                            {presets.slice(0, 2).map((p) => (
+                            {presets.map((p) => (
                                 <button
                                     key={p.label}
-                                    onClick={() => setDesign((s) => ({ ...s, widthMm: p.w, heightMm: p.h }))}
+                                    onClick={() =>
+                                        setDesign((s) => ({
+                                            ...s,
+                                            widthMm: clamp(p.w, MM_MIN_W, MM_MAX_W),
+                                            heightMm: clamp(p.h, MM_MIN_H, MM_MAX_H),
+                                        }))
+                                    }
                                     className={[
                                         "rounded-lg border px-3 py-2 text-sm font-medium",
                                         design.widthMm === p.w && design.heightMm === p.h
@@ -338,10 +365,13 @@ export default function BadgeBuilderPage() {
                                 <input
                                     type="number"
                                     value={design.widthMm}
-                                    min={50}
-                                    max={200}
-                                    step={0.5}
-                                    onChange={(e) => setDesign((s) => ({ ...s, widthMm: clamp(Number(e.target.value), 50, 200) }))}
+                                    min={MM_MIN_W}
+                                    max={MM_MAX_W}
+                                    step={MM_STEP}
+                                    onChange={(e) => setDesign((s) => ({
+                                        ...s,
+                                        widthMm: clamp(Number(e.target.value), MM_MIN_W, MM_MAX_W)
+                                    }))}
                                     className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                 />
                             </label>
@@ -350,10 +380,13 @@ export default function BadgeBuilderPage() {
                                 <input
                                     type="number"
                                     value={design.heightMm}
-                                    min={30}
-                                    max={200}
-                                    step={0.5}
-                                    onChange={(e) => setDesign((s) => ({ ...s, heightMm: clamp(Number(e.target.value), 30, 200) }))}
+                                    min={MM_MIN_H}
+                                    max={MM_MAX_H}
+                                    step={MM_STEP}
+                                    onChange={(e) => setDesign((s) => ({
+                                        ...s,
+                                        heightMm: clamp(Number(e.target.value), MM_MIN_H, MM_MAX_H)
+                                    }))}
                                     className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                 />
                             </label>
@@ -367,7 +400,8 @@ export default function BadgeBuilderPage() {
                     {/* 전역 */}
                     <div className="mt-6 grid gap-3 rounded-xl bg-gray-50 p-4">
                         <label className="flex items-center gap-2 text-sm text-gray-800">
-                            <input type="checkbox" checked={design.border} onChange={(e) => setDesign((p) => ({ ...p, border: e.target.checked }))} />
+                            <input type="checkbox" checked={design.border}
+                                   onChange={(e) => setDesign((p) => ({...p, border: e.target.checked}))}/>
                             테두리 표시
                         </label>
 
@@ -377,12 +411,12 @@ export default function BadgeBuilderPage() {
                                 <input
                                     type="color"
                                     value={design.accent}
-                                    onChange={(e) => setDesign((p) => ({ ...p, accent: e.target.value }))}
+                                    onChange={(e) => setDesign((p) => ({...p, accent: e.target.value}))}
                                     className="h-10 w-14 rounded-lg border"
                                 />
                                 <input
                                     value={design.accent}
-                                    onChange={(e) => setDesign((p) => ({ ...p, accent: clampHex(e.target.value) }))}
+                                    onChange={(e) => setDesign((p) => ({...p, accent: clampHex(e.target.value)}))}
                                     className="w-40 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                     placeholder="#111111"
                                 />
@@ -413,7 +447,7 @@ export default function BadgeBuilderPage() {
                                 <input
                                     type="checkbox"
                                     checked={design.fields[selected].visible}
-                                    onChange={(e) => setField(selected, { visible: e.target.checked })}
+                                    onChange={(e) => setField(selected, {visible: e.target.checked})}
                                 />
                                 표시
                             </label>
@@ -426,7 +460,7 @@ export default function BadgeBuilderPage() {
                                         value={design.fields[selected].fontSize}
                                         min={8}
                                         max={80}
-                                        onChange={(e) => setField(selected, { fontSize: clamp(Number(e.target.value), 8, 80) })}
+                                        onChange={(e) => setField(selected, {fontSize: clamp(Number(e.target.value), 8, 80)})}
                                         className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                     />
                                 </label>
@@ -438,7 +472,7 @@ export default function BadgeBuilderPage() {
                                         min={300}
                                         max={900}
                                         step={100}
-                                        onChange={(e) => setField(selected, { fontWeight: clamp(Number(e.target.value), 300, 900) })}
+                                        onChange={(e) => setField(selected, {fontWeight: clamp(Number(e.target.value), 300, 900)})}
                                         className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                     />
                                 </label>
@@ -448,7 +482,7 @@ export default function BadgeBuilderPage() {
                                 {(["left", "center", "right"] as const).map((a) => (
                                     <button
                                         key={a}
-                                        onClick={() => setField(selected, { align: a })}
+                                        onClick={() => setField(selected, {align: a})}
                                         className={[
                                             "rounded-lg border px-3 py-2 text-sm font-medium",
                                             design.fields[selected].align === a ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
@@ -461,10 +495,12 @@ export default function BadgeBuilderPage() {
 
                             <div className="grid grid-cols-2 gap-3 text-xs text-gray-600">
                                 <div className="rounded-lg bg-gray-50 p-2">
-                                    x: {Math.round(design.fields[selected].x)} / y: {Math.round(design.fields[selected].y)}
+                                    x: {Math.round(design.fields[selected].x)} /
+                                    y: {Math.round(design.fields[selected].y)}
                                 </div>
                                 <div className="rounded-lg bg-gray-50 p-2">
-                                    w: {Math.round(design.fields[selected].w)} / h: {Math.round(design.fields[selected].h)}
+                                    w: {Math.round(design.fields[selected].w)} /
+                                    h: {Math.round(design.fields[selected].h)}
                                 </div>
                             </div>
 
@@ -483,15 +519,15 @@ export default function BadgeBuilderPage() {
                     <div className="mt-4 flex items-center justify-center">
                         <div
                             className={["relative bg-white", design.border ? "border" : "", "rounded-lg shadow-sm select-none"].join(" ")}
-                            style={{ width: canvasW, height: canvasH }}
+                            style={{width: canvasW, height: canvasH}}
                             onPointerMove={onPointerMove}
                             onPointerUp={onPointerUp}
                             onPointerCancel={onPointerUp}
                             onPointerLeave={onPointerUp}
-                            onMouseDown={() => setSelected("name")}
-                        >
+                            onMouseDown={() => setSelected("name")}>
                             {/* 상단 강조 바 */}
-                            <div className="absolute left-0 top-0 h-2 w-full rounded-t-lg" style={{ backgroundColor: design.accent }} />
+                            <div className="absolute left-0 top-0 h-2 w-full rounded-t-lg"
+                                 style={{backgroundColor: design.accent}}/>
 
                             {(["name", "company", "title"] as const).map((k) => {
                                 const f = design.fields[k];
@@ -501,45 +537,41 @@ export default function BadgeBuilderPage() {
                                 const text = sampleText[k];
 
                                 return (
-                                    <div
-                                        key={k}
-                                        className={[
-                                            "absolute",
-                                            isSel ? "ring-2 ring-black/30" : "",
-                                            "rounded-md",
-                                        ].join(" ")}
-                                        style={{
-                                            left: f.x,
-                                            top: f.y,
-                                            width: f.w,
-                                            height: f.h,
-                                            cursor: "move",
-                                            padding: 6,
-                                            boxSizing: "border-box",
-                                        }}
-                                        onPointerDown={(e) => startMove(e, k)}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setSelected(k);
-                                        }}
-                                    >
-                                        <div
-                                            className="h-full w-full overflow-hidden"
-                                            style={{
-                                                fontSize: f.fontSize,
-                                                fontWeight: f.fontWeight as any,
-                                                textAlign: f.align,
-                                                lineHeight: 1.1,
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: f.align === "left" ? "flex-start" : f.align === "center" ? "center" : "flex-end",
-                                            }}
-                                        >
+                                    <div key={k}
+                                         className={[
+                                             "absolute",
+                                             isSel ? "ring-2 ring-black/30" : "",
+                                             "rounded-md",
+                                         ].join(" ")}
+                                         style={{
+                                             left: f.x,
+                                             top: f.y,
+                                             width: f.w,
+                                             height: f.h,
+                                             cursor: "move",
+                                             padding: 6,
+                                             boxSizing: "border-box",
+                                         }}
+                                         onPointerDown={(e) => startMove(e, k)}
+                                         onClick={(e) => {
+                                             e.stopPropagation();
+                                             setSelected(k);
+                                         }}>
+                                        <div className="h-full w-full overflow-hidden"
+                                             style={{
+                                                 fontSize: f.fontSize,
+                                                 fontWeight: f.fontWeight as any,
+                                                 textAlign: f.align,
+                                                 lineHeight: 1.1,
+                                                 display: "flex",
+                                                 alignItems: "center",
+                                                 justifyContent: f.align === "left" ? "flex-start" : f.align === "center" ? "center" : "flex-end",
+                                             }}>
                                             <span>{text}</span>
                                         </div>
 
                                         {/* 선택된 요소만 리사이즈 핸들 표시 */}
-                                        {isSel ? <ResizeHandles field={k} startResize={startResize} /> : null}
+                                        {isSel ? <ResizeHandles field={k} startResize={startResize}/> : null}
                                     </div>
                                 );
                             })}
@@ -548,7 +580,7 @@ export default function BadgeBuilderPage() {
 
                     <div className="mt-4 rounded-xl bg-gray-50 p-4 text-xs text-gray-600">
                         저장 키: <span className="font-mono">{STORAGE_KEY}</span>
-                        <br />
+                        <br/>
                         Print 페이지에서 이 키를 읽어 명찰 렌더링에 반영하세요. (현재는 커스텀 저장/미리보기까지)
                     </div>
                 </div>
@@ -557,10 +589,7 @@ export default function BadgeBuilderPage() {
     );
 }
 
-function ResizeHandles({
-                           field,
-                           startResize,
-                       }: {
+function ResizeHandles({field, startResize}: {
     field: FieldType;
     startResize: (e: React.PointerEvent, field: FieldType, handle: ResizeHandle) => void;
 }) {
@@ -568,16 +597,24 @@ function ResizeHandles({
     return (
         <>
             {/* corners */}
-            <div className={`${common} -left-1 -top-1 cursor-nwse-resize`} onPointerDown={(e) => startResize(e, field, "nw")} />
-            <div className={`${common} -right-1 -top-1 cursor-nesw-resize`} onPointerDown={(e) => startResize(e, field, "ne")} />
-            <div className={`${common} -left-1 -bottom-1 cursor-nesw-resize`} onPointerDown={(e) => startResize(e, field, "sw")} />
-            <div className={`${common} -right-1 -bottom-1 cursor-nwse-resize`} onPointerDown={(e) => startResize(e, field, "se")} />
+            <div className={`${common} -left-1 -top-1 cursor-nwse-resize`}
+                 onPointerDown={(e) => startResize(e, field, "nw")}/>
+            <div className={`${common} -right-1 -top-1 cursor-nesw-resize`}
+                 onPointerDown={(e) => startResize(e, field, "ne")}/>
+            <div className={`${common} -left-1 -bottom-1 cursor-nesw-resize`}
+                 onPointerDown={(e) => startResize(e, field, "sw")}/>
+            <div className={`${common} -right-1 -bottom-1 cursor-nwse-resize`}
+                 onPointerDown={(e) => startResize(e, field, "se")}/>
 
             {/* edges */}
-            <div className={`${common} left-1/2 -top-1 -translate-x-1/2 cursor-ns-resize`} onPointerDown={(e) => startResize(e, field, "n")} />
-            <div className={`${common} left-1/2 -bottom-1 -translate-x-1/2 cursor-ns-resize`} onPointerDown={(e) => startResize(e, field, "s")} />
-            <div className={`${common} -left-1 top-1/2 -translate-y-1/2 cursor-ew-resize`} onPointerDown={(e) => startResize(e, field, "w")} />
-            <div className={`${common} -right-1 top-1/2 -translate-y-1/2 cursor-ew-resize`} onPointerDown={(e) => startResize(e, field, "e")} />
+            <div className={`${common} left-1/2 -top-1 -translate-x-1/2 cursor-ns-resize`}
+                 onPointerDown={(e) => startResize(e, field, "n")}/>
+            <div className={`${common} left-1/2 -bottom-1 -translate-x-1/2 cursor-ns-resize`}
+                 onPointerDown={(e) => startResize(e, field, "s")}/>
+            <div className={`${common} -left-1 top-1/2 -translate-y-1/2 cursor-ew-resize`}
+                 onPointerDown={(e) => startResize(e, field, "w")}/>
+            <div className={`${common} -right-1 top-1/2 -translate-y-1/2 cursor-ew-resize`}
+                 onPointerDown={(e) => startResize(e, field, "e")}/>
         </>
     );
 }

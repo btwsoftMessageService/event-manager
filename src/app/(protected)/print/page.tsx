@@ -1,3 +1,4 @@
+// src/app/(protected)/print/page.tsx
 "use client";
 
 import {useEffect, useMemo, useState} from "react";
