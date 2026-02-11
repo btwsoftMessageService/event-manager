@@ -338,21 +338,20 @@ export default function BadgeBuilderPage() {
                         <div className="text-sm font-medium text-gray-700">명찰 사이즈 (mm)</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                             {presets.map((p) => (
-                                <button
-                                    key={p.label}
-                                    onClick={() =>
-                                        setDesign((s) => ({
-                                            ...s,
-                                            widthMm: clamp(p.w, MM_MIN_W, MM_MAX_W),
-                                            heightMm: clamp(p.h, MM_MIN_H, MM_MAX_H),
-                                        }))
-                                    }
-                                    className={[
-                                        "rounded-lg border px-3 py-2 text-sm font-medium",
-                                        design.widthMm === p.w && design.heightMm === p.h
-                                            ? "border-black bg-black text-white"
-                                            : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
-                                    ].join(" ")}
+                                <button key={p.label}
+                                        onClick={() =>
+                                            setDesign((s) => ({
+                                                ...s,
+                                                widthMm: clamp(p.w, MM_MIN_W, MM_MAX_W),
+                                                heightMm: clamp(p.h, MM_MIN_H, MM_MAX_H),
+                                            }))
+                                        }
+                                        className={[
+                                            "rounded-lg border px-3 py-2 text-sm font-medium",
+                                            design.widthMm === p.w && design.heightMm === p.h
+                                                ? "border-black bg-black text-white"
+                                                : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
+                                        ].join(" ")}
                                 >
                                     {p.label}
                                 </button>
@@ -362,32 +361,30 @@ export default function BadgeBuilderPage() {
                         <div className="mt-3 grid grid-cols-2 gap-3">
                             <label className="text-sm text-gray-700">
                                 너비(mm)
-                                <input
-                                    type="number"
-                                    value={design.widthMm}
-                                    min={MM_MIN_W}
-                                    max={MM_MAX_W}
-                                    step={MM_STEP}
-                                    onChange={(e) => setDesign((s) => ({
-                                        ...s,
-                                        widthMm: clamp(Number(e.target.value), MM_MIN_W, MM_MAX_W)
-                                    }))}
-                                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                                <input type="number"
+                                       value={design.widthMm}
+                                       min={MM_MIN_W}
+                                       max={MM_MAX_W}
+                                       step={MM_STEP}
+                                       onChange={(e) => setDesign((s) => ({
+                                           ...s,
+                                           widthMm: clamp(Number(e.target.value), MM_MIN_W, MM_MAX_W)
+                                       }))}
+                                       className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                 />
                             </label>
                             <label className="text-sm text-gray-700">
                                 높이(mm)
-                                <input
-                                    type="number"
-                                    value={design.heightMm}
-                                    min={MM_MIN_H}
-                                    max={MM_MAX_H}
-                                    step={MM_STEP}
-                                    onChange={(e) => setDesign((s) => ({
-                                        ...s,
-                                        heightMm: clamp(Number(e.target.value), MM_MIN_H, MM_MAX_H)
-                                    }))}
-                                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                                <input type="number"
+                                       value={design.heightMm}
+                                       min={MM_MIN_H}
+                                       max={MM_MAX_H}
+                                       step={MM_STEP}
+                                       onChange={(e) => setDesign((s) => ({
+                                           ...s,
+                                           heightMm: clamp(Number(e.target.value), MM_MIN_H, MM_MAX_H)
+                                       }))}
+                                       className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                 />
                             </label>
                         </div>
@@ -408,17 +405,15 @@ export default function BadgeBuilderPage() {
                         <div>
                             <div className="text-sm font-medium text-gray-700">강조색</div>
                             <div className="mt-2 flex items-center gap-3">
-                                <input
-                                    type="color"
-                                    value={design.accent}
-                                    onChange={(e) => setDesign((p) => ({...p, accent: e.target.value}))}
-                                    className="h-10 w-14 rounded-lg border"
+                                <input type="color"
+                                       value={design.accent}
+                                       onChange={(e) => setDesign((p) => ({...p, accent: e.target.value}))}
+                                       className="h-10 w-14 rounded-lg border"
                                 />
-                                <input
-                                    value={design.accent}
-                                    onChange={(e) => setDesign((p) => ({...p, accent: clampHex(e.target.value)}))}
-                                    className="w-40 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                                    placeholder="#111111"
+                                <input value={design.accent}
+                                       onChange={(e) => setDesign((p) => ({...p, accent: clampHex(e.target.value)}))}
+                                       className="w-40 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                                       placeholder="#111111"
                                 />
                             </div>
                         </div>
@@ -429,13 +424,12 @@ export default function BadgeBuilderPage() {
                         <div className="text-sm font-medium text-gray-700">필드 편집</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                             {(["name", "company", "title"] as const).map((k) => (
-                                <button
-                                    key={k}
-                                    onClick={() => setSelected(k)}
-                                    className={[
-                                        "rounded-lg border px-3 py-2 text-sm font-medium",
-                                        selected === k ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
-                                    ].join(" ")}
+                                <button key={k}
+                                        onClick={() => setSelected(k)}
+                                        className={[
+                                            "rounded-lg border px-3 py-2 text-sm font-medium",
+                                            selected === k ? "border-black bg-black text-white" : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50",
+                                        ].join(" ")}
                                 >
                                     {k === "name" ? "이름" : k === "company" ? "회사" : "직함"}
                                 </button>
@@ -444,10 +438,9 @@ export default function BadgeBuilderPage() {
 
                         <div className="mt-3 grid gap-3 rounded-xl border bg-white p-4">
                             <label className="flex items-center gap-2 text-sm text-gray-800">
-                                <input
-                                    type="checkbox"
-                                    checked={design.fields[selected].visible}
-                                    onChange={(e) => setField(selected, {visible: e.target.checked})}
+                                <input type="checkbox"
+                                       checked={design.fields[selected].visible}
+                                       onChange={(e) => setField(selected, {visible: e.target.checked})}
                                 />
                                 표시
                             </label>
@@ -455,25 +448,23 @@ export default function BadgeBuilderPage() {
                             <div className="grid grid-cols-2 gap-3">
                                 <label className="text-sm text-gray-700">
                                     폰트 크기
-                                    <input
-                                        type="number"
-                                        value={design.fields[selected].fontSize}
-                                        min={8}
-                                        max={80}
-                                        onChange={(e) => setField(selected, {fontSize: clamp(Number(e.target.value), 8, 80)})}
-                                        className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                                    <input type="number"
+                                           value={design.fields[selected].fontSize}
+                                           min={8}
+                                           max={80}
+                                           onChange={(e) => setField(selected, {fontSize: clamp(Number(e.target.value), 8, 80)})}
+                                           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                     />
                                 </label>
                                 <label className="text-sm text-gray-700">
                                     굵기
-                                    <input
-                                        type="number"
-                                        value={design.fields[selected].fontWeight}
-                                        min={300}
-                                        max={900}
-                                        step={100}
-                                        onChange={(e) => setField(selected, {fontWeight: clamp(Number(e.target.value), 300, 900)})}
-                                        className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                                    <input type="number"
+                                           value={design.fields[selected].fontWeight}
+                                           min={300}
+                                           max={900}
+                                           step={100}
+                                           onChange={(e) => setField(selected, {fontWeight: clamp(Number(e.target.value), 300, 900)})}
+                                           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                                     />
                                 </label>
                             </div>
