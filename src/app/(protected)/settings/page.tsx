@@ -11,7 +11,7 @@ import {
     saveSettingsClient,
 } from "@/lib/settings";
 
-type Toast = { kind: "success" | "error" | "info"; message: string } | null;
+type Toast = { kind: "success" | "error" | "info"; message: string };
 
 function normalizeUrl(url: string) {
     const v = (url ?? "").trim();
@@ -115,21 +115,17 @@ function Switch({
     labelRight?: string;
 }) {
     return (
-        <button
-            type="button"
-            onClick={() => onChange(!checked)}
-            className={cx(
-                "relative inline-flex h-10 w-[88px] items-center rounded-full border px-1 transition",
-                checked ? "border-zinc-900 bg-zinc-900" : "border-zinc-200 bg-zinc-100"
-            )}
-            aria-pressed={checked}
-        >
-      <span
-          className={cx(
-              "inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-xs font-semibold shadow transition",
-              checked ? "translate-x-[44px] text-zinc-900" : "translate-x-0 text-zinc-700"
-          )}
-      >
+        <button type="button"
+                onClick={() => onChange(!checked)}
+                className={cx(
+                    "relative inline-flex h-10 w-[88px] items-center rounded-full border px-1 transition",
+                    checked ? "border-zinc-900 bg-zinc-900" : "border-zinc-200 bg-zinc-100"
+                )}
+                aria-pressed={checked}>
+      <span className={cx(
+          "inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-xs font-semibold shadow transition",
+          checked ? "translate-x-[44px] text-zinc-900" : "translate-x-0 text-zinc-700"
+      )}>
         {checked ? labelRight ?? "ON" : labelLeft ?? "OFF"}
       </span>
         </button>
@@ -139,7 +135,7 @@ function Switch({
 export default function SettingsPage() {
     const [settings, setSettings] = useState<AppSettings>(defaultSettings);
     const [dirty, setDirty] = useState(false);
-    const [toast, setToast] = useState<Toast>(null);
+    const [toast, setToast] = useState<Toast | null>(null);
     const [health, setHealth] = useState<{ status: "idle" | "ok" | "fail"; detail?: string }>({
         status: "idle",
     });
@@ -430,39 +426,32 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                     {/* Left column */}
                     <div className="space-y-6 lg:col-span-8">
-                        <Card
-                            title="General"
-                            description="테넌트/백엔드 연결 등 기본 설정"
-                            right={<div className="flex items-center gap-2">{healthBadge}</div>}
-                        >
+                        <Card title="General"
+                              description="테넌트/백엔드 연결 등 기본 설정"
+                              right={<div className="flex items-center gap-2">{healthBadge}</div>}>
                             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                                 <Field label="Tenant Name" help="사이드바/상단 등에 표시될 고객(회사) 이름" required>
                                     <input
                                         className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.tenantName}
                                         onChange={(e) => onChange("tenantName", e.target.value)}
-                                        placeholder="예: ABC Corp"
-                                    />
+                                        placeholder="예: ABC Corp"/>
                                 </Field>
 
-                                <Field
-                                    label="Backend Base URL"
-                                    required
-                                    help="예: http://localhost:8080 (끝 슬래시 자동 제거)"
-                                    error={validation.errors.backendBaseUrl}
-                                >
+                                <Field label="Backend Base URL"
+                                       required
+                                       help="예: http://localhost:8080 (끝 슬래시 자동 제거)"
+                                       error={validation.errors.backendBaseUrl}>
                                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                                         <input
                                             className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                             value={settings.backendBaseUrl}
                                             onChange={(e) => onChange("backendBaseUrl", e.target.value)}
-                                            placeholder="예: http://localhost:8080"
-                                        />
+                                            placeholder="예: http://localhost:8080"/>
                                         <button
                                             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm hover:bg-zinc-50"
                                             onClick={checkHealth}
-                                            type="button"
-                                        >
+                                            type="button">
                                             헬스체크
                                         </button>
                                     </div>
@@ -482,16 +471,14 @@ export default function SettingsPage() {
                                         className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.timezone}
                                         onChange={(e) => onChange("timezone", e.target.value)}
-                                        placeholder='예: "Asia/Seoul"'
-                                    />
+                                        placeholder='예: "Asia/Seoul"'/>
                                 </Field>
 
                                 <Field label="Locale" help="관리자 콘솔 기본 언어">
                                     <select
                                         className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.locale}
-                                        onChange={(e) => onChange("locale", e.target.value as AppSettings["locale"])}
-                                    >
+                                        onChange={(e) => onChange("locale", e.target.value as AppSettings["locale"])}>
                                         <option value="ko">ko (Korean)</option>
                                         <option value="en">en (English)</option>
                                     </select>
@@ -501,17 +488,14 @@ export default function SettingsPage() {
 
                         <Card title="Integrations" description="외부 서비스 연동">
                             <div className="grid grid-cols-1 gap-5">
-                                <Field
-                                    label="Google Form URL"
-                                    help="구글폼 응답 수집/연결용. 백엔드에서 이 값을 사용하도록 설계"
-                                    error={validation.errors.googleFormUrl}
-                                >
+                                <Field label="Google Form URL"
+                                       help="구글폼 응답 수집/연결용. 백엔드에서 이 값을 사용하도록 설계"
+                                       error={validation.errors.googleFormUrl}>
                                     <input
                                         className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.googleFormUrl}
                                         onChange={(e) => onChange("googleFormUrl", e.target.value)}
-                                        placeholder="예: https://docs.google.com/forms/..."
-                                    />
+                                        placeholder="예: https://docs.google.com/forms/..."/>
                                 </Field>
                             </div>
                         </Card>
@@ -524,43 +508,34 @@ export default function SettingsPage() {
                                         <div className="text-sm font-semibold text-zinc-900">Email Notification</div>
                                         <div className="mt-1 text-xs text-zinc-600">메일 알림 기능 사용 여부</div>
                                     </div>
-                                    <Switch
-                                        checked={settings.enableEmailNotify}
-                                        onChange={(v) => onChange("enableEmailNotify", v)}
-                                        labelLeft="OFF"
-                                        labelRight="ON"
-                                    />
+                                    <Switch checked={settings.enableEmailNotify}
+                                            onChange={(v) => onChange("enableEmailNotify", v)}
+                                            labelLeft="OFF"
+                                            labelRight="ON"/>
                                 </div>
 
                                 <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                                    <Field
-                                        label="Email (공지 수신/발신용)"
-                                        required={settings.enableEmailNotify}
-                                        help="메일 알림 기능을 켠 경우 필수"
-                                        error={validation.errors.notifyEmailFrom}
-                                    >
+                                    <Field label="Email (공지 수신/발신용)"
+                                           required={settings.enableEmailNotify}
+                                           help="메일 알림 기능을 켠 경우 필수"
+                                           error={validation.errors.notifyEmailFrom}>
                                         <input
                                             className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                             value={settings.notifyEmailFrom}
                                             onChange={(e) => onChange("notifyEmailFrom", e.target.value)}
-                                            placeholder="예: no-reply@your-domain.com"
-                                        />
+                                            placeholder="예: no-reply@your-domain.com"/>
                                     </Field>
 
-                                    <Field
-                                        label="QR TTL (minutes)"
-                                        required
-                                        help="QR 인증 유효시간(분). 운영 권장: 3~15분"
-                                        error={validation.errors.qrTtlMinutes}
-                                    >
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            max={1440}
-                                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
-                                            value={settings.qrTtlMinutes}
-                                            onChange={(e) => onChange("qrTtlMinutes", Number(e.target.value))}
-                                        />
+                                    <Field label="QR TTL (minutes)"
+                                           required
+                                           help="QR 인증 유효시간(분). 운영 권장: 3~15분"
+                                           error={validation.errors.qrTtlMinutes}>
+                                        <input type="number"
+                                               min={1}
+                                               max={1440}
+                                               className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                               value={settings.qrTtlMinutes}
+                                               onChange={(e) => onChange("qrTtlMinutes", Number(e.target.value))}/>
                                     </Field>
                                 </div>
 
@@ -570,12 +545,10 @@ export default function SettingsPage() {
                                         <div className="text-sm font-semibold text-zinc-900">Check-in Duplicate</div>
                                         <div className="mt-1 text-xs text-zinc-600">체크인 중복 스캔 허용 여부</div>
                                     </div>
-                                    <Switch
-                                        checked={settings.checkinAllowDuplicate}
-                                        onChange={(v) => onChange("checkinAllowDuplicate", v)}
-                                        labelLeft="BLOCK"
-                                        labelRight="ALLOW"
-                                    />
+                                    <Switch checked={settings.checkinAllowDuplicate}
+                                            onChange={(v) => onChange("checkinAllowDuplicate", v)}
+                                            labelLeft="BLOCK"
+                                            labelRight="ALLOW"/>
                                 </div>
                             </div>
                         </Card>
@@ -594,22 +567,24 @@ export default function SettingsPage() {
                                 <Field label="SMTP Port" error={validation.errors.smtpPort}
                                        help="일반적으로 587(TLS), 465(SSL)">
                                     <input type="number"
-                                        min={1}
-                                        max={65535}
-                                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
-                                        value={settings.smtpPort}
-                                        onChange={(e) => onChange("smtpPort", Number(e.target.value))}/>
+                                           min={1}
+                                           max={65535}
+                                           className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                           value={settings.smtpPort}
+                                           onChange={(e) => onChange("smtpPort", Number(e.target.value))}/>
                                 </Field>
 
                                 <Field label="SMTP User">
-                                    <input className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                    <input
+                                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.smtpUser}
                                         onChange={(e) => onChange("smtpUser", e.target.value)}
                                         placeholder="예: account@example.com"/>
                                 </Field>
 
                                 <Field label="SMTP Password" help="보안상 화면에 표시되므로 운영에서는 별도 관리 권장">
-                                    <input className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                    <input
+                                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         type="password"
                                         value={settings.smtpPass}
                                         onChange={(e) => onChange("smtpPass", e.target.value)}
@@ -617,15 +592,16 @@ export default function SettingsPage() {
                                 </Field>
 
                                 <div className="md:col-span-2">
-                                    <div className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-4">
+                                    <div
+                                        className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-4">
                                         <div>
                                             <div className="text-sm font-semibold text-zinc-900">Use TLS</div>
                                             <div className="mt-1 text-xs text-zinc-600">STARTTLS/TLS 사용 여부</div>
                                         </div>
                                         <Switch checked={settings.smtpUseTls}
-                                            onChange={(v) => onChange("smtpUseTls", v)}
-                                            labelLeft="OFF"
-                                            labelRight="ON"/>
+                                                onChange={(v) => onChange("smtpUseTls", v)}
+                                                labelLeft="OFF"
+                                                labelRight="ON"/>
                                     </div>
                                 </div>
                             </div>
@@ -634,7 +610,8 @@ export default function SettingsPage() {
                         <Card title="Excel Import" description="참여자 엑셀 업로드 처리 정책">
                             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                                 <Field label="Duplicate Key" help="중복 판별 기준">
-                                    <select className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                    <select
+                                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.excelDuplicateKey}
                                         onChange={(e) =>
                                             onChange("excelDuplicateKey", e.target.value as AppSettings["excelDuplicateKey"])
@@ -645,7 +622,8 @@ export default function SettingsPage() {
                                 </Field>
 
                                 <Field label="Import Mode" help="업로드 시 데이터 반영 방식">
-                                    <select className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
+                                    <select
+                                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900"
                                         value={settings.excelMode}
                                         onChange={(e) => onChange("excelMode", e.target.value as AppSettings["excelMode"])}>
                                         <option value="merge">merge (병합)</option>
@@ -660,27 +638,30 @@ export default function SettingsPage() {
                     <div className="space-y-6 lg:col-span-4">
                         <Card title="Maintenance" description="설정 백업/복원 및 초기화">
                             <div className="space-y-3">
-                                <button className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
+                                <button
+                                    className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
                                     onClick={onExport}
                                     type="button">
                                     JSON 내보내기
                                 </button>
 
-                                <button className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
+                                <button
+                                    className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
                                     onClick={onImportClick}
                                     type="button">
                                     JSON 가져오기
                                 </button>
 
                                 <input ref={importRef}
-                                    type="file"
-                                    accept="application/json"
-                                    className="hidden"
-                                    onChange={(e) => onImportFile(e.target.files?.[0] ?? null)}/>
+                                       type="file"
+                                       accept="application/json"
+                                       className="hidden"
+                                       onChange={(e) => onImportFile(e.target.files?.[0] ?? null)}/>
 
                                 <div className="h-px w-full bg-zinc-100"/>
 
-                                <button className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
+                                <button
+                                    className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
                                     onClick={onReset}
                                     type="button">
                                     초기화
@@ -692,7 +673,8 @@ export default function SettingsPage() {
 
                         <Card title="Validation" description="현재 입력값 점검">
                             {validation.ok ? (
-                                <div className="flex items-center justify-between rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
+                                <div
+                                    className="flex items-center justify-between rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
                                     <div className="text-sm font-medium text-green-800">문제 없음</div>
                                     <Badge tone="green">OK</Badge>
                                 </div>
@@ -719,15 +701,16 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <button className={cx(
-                                    "rounded-xl px-4 py-2.5 text-sm font-semibold",
-                                    validation.ok && dirty ? "bg-zinc-900 text-white hover:opacity-90" : "bg-zinc-200 text-zinc-600"
-                                )}
-                                onClick={onSave}
-                                disabled={!dirty || !validation.ok}
-                                type="button">
+                                "rounded-xl px-4 py-2.5 text-sm font-semibold",
+                                validation.ok && dirty ? "bg-zinc-900 text-white hover:opacity-90" : "bg-zinc-200 text-zinc-600"
+                            )}
+                                    onClick={onSave}
+                                    disabled={!dirty || !validation.ok}
+                                    type="button">
                                 저장
                             </button>
-                            <button className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
+                            <button
+                                className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm hover:bg-zinc-50"
                                 onClick={onReset}
                                 type="button">
                                 초기화
