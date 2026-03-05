@@ -7,7 +7,7 @@ type Props = {
     params: Promise<{ eventId: string }>;
 };
 
-// ✅ 프로토타입용 Mock (나중에 API/DB로 교체)
+// 프로토타입용 Mock (나중에 API/DB로 교체)
 function getMockEvent(eventId: string) {
     const now = new Date();
     const start = new Date(now.getTime() + 1000 * 60 * 60 * 24); // +1일
