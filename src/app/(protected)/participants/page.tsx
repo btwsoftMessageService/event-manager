@@ -3,7 +3,7 @@
 "use client";
 
 import React, {useEffect, useMemo, useRef, useState} from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import {postJson} from "@/lib/api";
 import {formatPhoneKR, isValidEmail, normalizeEmail, normalizePhoneDigits} from "@/lib/validators";
 
@@ -88,16 +88,18 @@ function downloadBlob(blob: Blob, filename: string) {
     URL.revokeObjectURL(url);
 }
 
-function makeSampleWorkbook() {
-    const aoa = [
-        TEMPLATE_HEADERS,
-        ["홍길동", "hong@example.com", "010-1234-5678", "BTWSoft", "매니저"],
-        ["김철수", "kim@example.com", "010-0000-0000", "Sample Co.", "참가자"],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "participants");
-    return wb;
+async function makeSampleWorkbookBlob() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("participants");
+
+    worksheet.addRow(TEMPLATE_HEADERS);
+    worksheet.addRow(["홍길동", "hong@example.com", "010-1234-5678", "BTWSoft", "매니저"]);
+    worksheet.addRow(["김철수", "kim@example.com", "010-0000-0000", "Sample Co.", "참가자"]);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
 }
 
 /** ✅ 테스트용 더미 데이터 (localStorage 비어있을 때 1회 주입용) */
@@ -154,6 +156,48 @@ function makeMockParticipants(): Person[] {
     ];
 }
 
+function parseCsvLine(line: string): string[] {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const next = line[i + 1];
+
+        if (char === "\"") {
+            if (inQuotes && next === "\"") {
+                current += "\"";
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+
+        if (char === "," && !inQuotes) {
+            result.push(current);
+            current = "";
+            continue;
+        }
+
+        current += char;
+    }
+
+    result.push(current);
+    return result.map((v) => v.trim());
+}
+
+function parseCsvText(text: string): unknown[][] {
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = normalized
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    return lines.map((line) => parseCsvLine(line));
+}
+
 // ✅ 엑셀/CSV → UploadRow[]
 async function parseFileToRows(
     file: File
@@ -162,29 +206,26 @@ async function parseFileToRows(
     const isCsv = ext === "csv";
 
     const warnings: string[] = [];
+    let aoa: unknown[][] = [];
 
-    const data = await new Promise<ArrayBuffer | string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error("파일을 읽는 중 오류가 발생했습니다."));
-        reader.onload = () => resolve(reader.result as any);
-        if (isCsv) reader.readAsText(file);
-        else reader.readAsArrayBuffer(file);
-    });
+    if (isCsv) {
+        const text = await file.text();
+        aoa = parseCsvText(text);
+    } else {
+        const buffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
 
-    const wb = isCsv
-        ? XLSX.read(data as string, {type: "string"})
-        : XLSX.read(data as ArrayBuffer, {type: "array"});
+        const worksheet = workbook.worksheets[0];
+        if (!worksheet) throw new Error("엑셀 시트를 찾지 못했습니다.");
 
-    const sheetName = wb.SheetNames[0];
-    if (!sheetName) throw new Error("엑셀 시트를 찾지 못했습니다.");
+        aoa = [];
+        worksheet.eachRow((row) => {
+            const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+            aoa.push(values);
+        });
+    }
 
-    const ws = wb.Sheets[sheetName];
-    if (!ws) throw new Error("엑셀 시트를 읽지 못했습니다.");
-
-    const aoa = XLSX.utils.sheet_to_json(ws, {
-        header: 1,
-        blankrows: false,
-    }) as unknown[][];
     if (!aoa.length) throw new Error("엑셀에 데이터가 없습니다.");
 
     const rawHeaders = (aoa[0] ?? []).map((h) => String(h ?? "").trim());
@@ -210,7 +251,12 @@ async function parseFileToRows(
             const v = row[idx];
             const text = String(v ?? "").trim();
             if (!text) return;
-            (obj as any)[key] = text;
+
+            if (key === "name") obj.name = text;
+            else if (key === "email") obj.email = text;
+            else if (key === "phone") obj.phone = text;
+            else if (key === "company") obj.company = text;
+            else if (key === "role") obj.role = text;
         });
 
         if (!obj.name) {
@@ -328,11 +374,6 @@ export default function GlobalParticipantsPage() {
         const eKey = e ? normalizeEmail(e) : "";
         const pKey = phone.trim() ? normalizePhoneDigits(phone) : "";
 
-        // 중복 키 생성 시 이메일은 normalize해서 비교
-        const keyNew = email.trim()
-            ? `email:${normalize(email)}`
-            : `name:${normalize(n)}|phone:${normalize(phone)}`;
-
         // email 또는 phone만 중복 기준 (이름은 제외)
         const exists = items.some((p) => {
             const oldE = p.email ? normalizeEmail(p.email) : "";
@@ -397,13 +438,9 @@ export default function GlobalParticipantsPage() {
         }
     };
 
-    const downloadSample = () => {
-        const wb = makeSampleWorkbook();
-        const out = XLSX.write(wb, {bookType: "xlsx", type: "array"});
-        downloadBlob(
-            new Blob([out], {type: "application/octet-stream"}),
-            "global-participants-sample.xlsx"
-        );
+    const downloadSample = async () => {
+        const blob = await makeSampleWorkbookBlob();
+        downloadBlob(blob, "global-participants-sample.xlsx");
     };
 
     const onPickFile = () => inputRef.current?.click();
@@ -479,8 +516,9 @@ export default function GlobalParticipantsPage() {
             // 3) API 성공한 경우(나중에 백엔드 생기면 이 루트로만 타게 됨)
             setInfo(`API 등록 완료: ${apiResult.data.inserted}명`);
             // 백엔드가 "저장된 최신 목록"을 리턴하면 여기서 setItems로 동기화하면 됨.
-        } catch (e: any) {
-            setError(e?.message ?? "업로드 처리 중 오류가 발생했습니다.");
+        } catch (e) {
+            if (e instanceof Error) setError(e.message);
+            else setError("업로드 처리 중 오류가 발생했습니다.");
         } finally {
             setUploading(false);
         }
@@ -510,18 +548,24 @@ export default function GlobalParticipantsPage() {
                 </div>
 
                 <div className="flex gap-2">
-                    <button onClick={onInjectMocks}
-                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button
+                        onClick={onInjectMocks}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
                         더미 데이터 주입
                     </button>
 
-                    <button onClick={downloadSample}
-                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button
+                        onClick={downloadSample}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
                         샘플 엑셀 다운로드
                     </button>
 
-                    <button onClick={onResetAll}
-                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button
+                        onClick={onResetAll}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
                         전체 초기화
                     </button>
                 </div>
@@ -558,16 +602,18 @@ export default function GlobalParticipantsPage() {
                     <div className="text-xs text-gray-500">.xlsx / .csv (첫 줄 헤더 필요)</div>
                 </div>
 
-                <div onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                }}
-                     onDragLeave={() => setDragOver(false)}
-                     onDrop={onDrop}
-                     className={[
-                         "mt-4 rounded-2xl border bg-white p-6 transition",
-                         dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
-                     ].join(" ")}>
+                <div
+                    onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    className={[
+                        "mt-4 rounded-2xl border bg-white p-6 transition",
+                        dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
+                    ].join(" ")}
+                >
                     <div className="flex flex-col items-center gap-2 text-center">
                         <div className="text-base font-semibold text-black">
                             파일을 드래그하거나 선택하세요
@@ -578,22 +624,28 @@ export default function GlobalParticipantsPage() {
                         </div>
 
                         <div className="mt-3 flex gap-2">
-                            <button onClick={onPickFile}
-                                    disabled={uploading}
-                                    className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+                            <button
+                                onClick={onPickFile}
+                                disabled={uploading}
+                                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                            >
                                 {uploading ? "업로드 중..." : "파일 선택"}
                             </button>
-                            <button onClick={downloadSample}
-                                    className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                            <button
+                                onClick={downloadSample}
+                                className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                            >
                                 샘플 다운로드
                             </button>
                         </div>
 
-                        <input ref={inputRef}
-                               type="file"
-                               accept=".xlsx,.xls,.csv"
-                               className="hidden"
-                               onChange={onInputChange}/>
+                        <input
+                            ref={inputRef}
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            className="hidden"
+                            onChange={onInputChange}
+                        />
                     </div>
                 </div>
             </section>
@@ -608,47 +660,59 @@ export default function GlobalParticipantsPage() {
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <div>
                         <label className="text-sm font-medium text-gray-700">이름 *</label>
-                        <input value={name}
-                               onChange={(e) => setName(e.target.value)}
-                               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                               placeholder="홍길동"/>
+                        <input
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="홍길동"
+                        />
                     </div>
 
                     <div>
                         <label className="text-sm font-medium text-gray-700">이메일</label>
-                        <input value={email}
-                               onChange={(e) => setEmail(e.target.value)}
-                               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                               placeholder="hong@example.com"/>
+                        <input
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="hong@example.com"
+                        />
                     </div>
 
                     <div>
                         <label className="text-sm font-medium text-gray-700">전화번호</label>
-                        <input value={phone}
-                               onChange={(e) => setPhone(formatPhoneKR(e.target.value))}
-                               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                               placeholder="010-1234-5678"/>
+                        <input
+                            value={phone}
+                            onChange={(e) => setPhone(formatPhoneKR(e.target.value))}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="010-1234-5678"
+                        />
                     </div>
 
                     <div>
                         <label className="text-sm font-medium text-gray-700">회사</label>
-                        <input value={company}
-                               onChange={(e) => setCompany(e.target.value)}
-                               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                               placeholder="BTWSoft"/>
+                        <input
+                            value={company}
+                            onChange={(e) => setCompany(e.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="BTWSoft"
+                        />
                     </div>
 
                     <div>
                         <label className="text-sm font-medium text-gray-700">직함/역할</label>
-                        <input value={role}
-                               onChange={(e) => setRole(e.target.value)}
-                               className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                               placeholder="매니저"/>
+                        <input
+                            value={role}
+                            onChange={(e) => setRole(e.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="매니저"
+                        />
                     </div>
 
                     <div className="flex items-end">
-                        <button onClick={onRegister}
-                                className="w-full rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+                        <button
+                            onClick={onRegister}
+                            className="w-full rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                        >
                             등록
                         </button>
                     </div>
@@ -660,10 +724,12 @@ export default function GlobalParticipantsPage() {
                 {/* 왼쪽: 검색 */}
                 <div className="w-full md:max-w-xl">
                     <label className="text-sm font-medium text-gray-700">검색</label>
-                    <input value={q}
-                           onChange={(e) => setQ(e.target.value)}
-                           className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                           placeholder="이름 / 이메일 / 전화 / 회사 / 역할"/>
+                    <input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                        placeholder="이름 / 이메일 / 전화 / 회사 / 역할"
+                    />
                 </div>
 
                 {/* 오른쪽: 카운트(폭 고정) */}
@@ -692,19 +758,12 @@ export default function GlobalParticipantsPage() {
                         {/* ✅ 컬럼 폭 고정(데이터 길이로 가로폭이 흔들리는 것 방지) */}
                         <colgroup>
                             <col className="w-[140px]"/>
-                            {/* 이름 */}
                             <col className="w-[240px]"/>
-                            {/* 이메일 */}
                             <col className="w-[160px]"/>
-                            {/* 전화번호 */}
                             <col className="w-[160px]"/>
-                            {/* 회사 */}
                             <col className="w-[120px]"/>
-                            {/* 역할 */}
                             <col className="w-[170px]"/>
-                            {/* 등록일 */}
                             <col className="w-[90px]"/>
-                            {/* 관리 */}
                         </colgroup>
 
                         <thead className="bg-gray-50 text-gray-700">
@@ -722,8 +781,10 @@ export default function GlobalParticipantsPage() {
                         <tbody>
                         {filtered.length === 0 ? (
                             <tr>
-                                <td colSpan={7}
-                                    className="px-4 py-10 text-center text-sm text-gray-600">
+                                <td
+                                    colSpan={7}
+                                    className="px-4 py-10 text-center text-sm text-gray-600"
+                                >
                                     등록된 참가자가 없습니다.
                                 </td>
                             </tr>
@@ -749,8 +810,10 @@ export default function GlobalParticipantsPage() {
                                         {formatKST(p.createdAt)}
                                     </td>
                                     <td className="border-b px-4 py-3">
-                                        <button onClick={() => onDelete(p.id)}
-                                                className="w-full rounded-lg border px-3 py-1 text-xs font-medium text-gray-900 hover:bg-gray-50">
+                                        <button
+                                            onClick={() => onDelete(p.id)}
+                                            className="w-full rounded-lg border px-3 py-1 text-xs font-medium text-gray-900 hover:bg-gray-50"
+                                        >
                                             삭제
                                         </button>
                                     </td>
