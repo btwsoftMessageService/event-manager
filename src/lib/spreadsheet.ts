@@ -1,36 +1,27 @@
-import ExcelJS from "exceljs";
-import Papa from "papaparse";
+import {parseSpreadsheetPreview, type SpreadsheetUploadRow, validateSpreadsheetFile,} from "@/lib/excel-preview";
 
-export async function parseExcel(file: File): Promise<any[]> {
-    const buffer = await file.arrayBuffer();
+export type ParsedSpreadsheetRow = SpreadsheetUploadRow;
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+export async function parseExcel(file: File): Promise<ParsedSpreadsheetRow[]> {
+    validateSpreadsheetFile(file);
 
-    const worksheet = workbook.worksheets[0];
-    const rows: any[] = [];
+    const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+    if (extension !== "xlsx") {
+        throw new Error("엑셀 미리보기는 .xlsx 파일만 지원합니다.");
+    }
 
-    worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-
-        const values = row.values as any[];
-
-        rows.push({
-            name: values[1],
-            email: values[2],
-            phone: values[3]
-        });
-    });
-
-    return rows;
+    const result = await parseSpreadsheetPreview(file);
+    return result.rows;
 }
 
-export function parseCSV(file: File): Promise<any[]> {
-    return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-            header: true,
-            complete: (result) => resolve(result.data as any[]),
-            error: reject
-        });
-    });
+export async function parseCSV(file: File): Promise<ParsedSpreadsheetRow[]> {
+    validateSpreadsheetFile(file);
+
+    const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+    if (extension !== "csv") {
+        throw new Error("CSV 미리보기는 .csv 파일만 지원합니다.");
+    }
+
+    const result = await parseSpreadsheetPreview(file);
+    return result.rows;
 }
