@@ -2,7 +2,7 @@
 "use client";
 
 import React, {use, useEffect, useMemo, useRef, useState} from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 type Props = {
     params: Promise<{ eventId: string }>;
@@ -76,19 +76,23 @@ function downloadBlob(blob: Blob, filename: string) {
     URL.revokeObjectURL(url);
 }
 
-function makeWorkbookFromParticipants(rows: Participant[]) {
-    // 첫 행: 한국어 헤더 라벨로 구성
-    const headerLabels = TEMPLATE_HEADERS.map((h) => h.label);
-    const data = rows.map((r) => TEMPLATE_HEADERS.map((h) => (r[h.key] ?? "")));
+async function makeWorkbookFromParticipantsBlob(rows: Participant[]) {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("participants");
 
-    const aoa = [headerLabels, ...data];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "participants");
-    return wb;
+    worksheet.addRow(TEMPLATE_HEADERS.map((h) => h.label));
+
+    rows.forEach((r) => {
+        worksheet.addRow(TEMPLATE_HEADERS.map((h) => r[h.key] ?? ""));
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
 }
 
-function makeSampleWorkbook() {
+async function makeSampleWorkbookBlob() {
     const sampleRows: Participant[] = [
         {
             name: "홍길동",
@@ -109,84 +113,122 @@ function makeSampleWorkbook() {
             note: "",
         },
     ];
-    return makeWorkbookFromParticipants(sampleRows);
+
+    return makeWorkbookFromParticipantsBlob(sampleRows);
 }
 
-function parseFileToParticipants(file: File): Promise<{ rows: Participant[]; warnings: string[] }> {
-    return new Promise((resolve, reject) => {
-        const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-        const isCsv = ext === "csv";
+function parseCsvLine(line: string): string[] {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
 
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error("파일을 읽는 중 오류가 발생했습니다."));
-        reader.onload = () => {
-            try {
-                const data = reader.result;
-                const wb = isCsv
-                    ? XLSX.read(data as string, {type: "string"})
-                    : XLSX.read(data as ArrayBuffer, {type: "array"});
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const next = line[i + 1];
 
-                const sheetName = wb.SheetNames[0];
-                if (!sheetName) throw new Error("엑셀 시트를 찾지 못했습니다.");
-                const ws = wb.Sheets[sheetName];
-                if (!ws) throw new Error("엑셀 시트를 읽지 못했습니다.");
-
-                // 2D 배열로 읽어서 헤더를 직접 처리 (첫 행을 헤더로)
-                const aoa = XLSX.utils.sheet_to_json(ws, {header: 1, blankrows: false}) as unknown[][];
-                if (!aoa.length) throw new Error("엑셀에 데이터가 없습니다.");
-
-                const rawHeaders = (aoa[0] ?? []).map((h) => String(h ?? "").trim());
-                const headerMap: Array<keyof Participant | null> = rawHeaders.map((h) => {
-                    const key = HEADER_ALIASES[h] ?? HEADER_ALIASES[sanitizeHeader(h)];
-                    return key ?? null;
-                });
-
-                // name(이름) 컬럼이 없으면 템플릿 기준으로 강제 안내
-                const hasName = headerMap.includes("name");
-                if (!hasName) {
-                    throw new Error("헤더(첫 줄)에 '이름' 컬럼이 필요합니다. 샘플 엑셀을 다운로드해서 형식을 맞춰주세요.");
-                }
-
-                const warnings: string[] = [];
-                const rows: Participant[] = [];
-
-                for (let i = 1; i < aoa.length; i++) {
-                    const row = aoa[i] ?? [];
-                    const obj: Participant = {name: ""};
-
-                    headerMap.forEach((key, idx) => {
-                        if (!key) return;
-                        const v = row[idx];
-                        const text = String(v ?? "").trim();
-                        if (!text) return;
-
-                        // 간단 정리
-                        if (key === "email") obj.email = text;
-                        else if (key === "phone") obj.phone = text;
-                        else if (key === "company") obj.company = text;
-                        else if (key === "role") obj.role = text;
-                        else if (key === "ticketType") obj.ticketType = text;
-                        else if (key === "note") obj.note = text;
-                        else if (key === "name") obj.name = text;
-                    });
-
-                    if (!obj.name) {
-                        warnings.push(`${i + 1}행: 이름이 비어 있어 제외했습니다.`);
-                        continue;
-                    }
-
-                    rows.push(obj);
-                }
-
-                resolve({rows, warnings});
-            } catch (e) {
-                reject(e);
+        if (char === "\"") {
+            if (inQuotes && next === "\"") {
+                current += "\"";
+                i++;
+            } else {
+                inQuotes = !inQuotes;
             }
-        };
+            continue;
+        }
 
-        if (isCsv) reader.readAsText(file);
-        else reader.readAsArrayBuffer(file);
+        if (char === "," && !inQuotes) {
+            result.push(current);
+            current = "";
+            continue;
+        }
+
+        current += char;
+    }
+
+    result.push(current);
+    return result.map((v) => v.trim());
+}
+
+function parseCsvText(text: string): unknown[][] {
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = normalized
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    return lines.map((line) => parseCsvLine(line));
+}
+
+async function parseFileToParticipants(
+    file: File
+): Promise<{ rows: Participant[]; warnings: string[] }> {
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+    const isCsv = ext === "csv";
+
+    let aoa: unknown[][] = [];
+
+    if (isCsv) {
+        const text = await file.text();
+        aoa = parseCsvText(text);
+    } else {
+        const buffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+
+        const worksheet = workbook.worksheets[0];
+        if (!worksheet) throw new Error("엑셀 시트를 찾지 못했습니다.");
+
+        worksheet.eachRow((row) => {
+            const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+            aoa.push(values);
+        });
+    }
+
+    if (!aoa.length) throw new Error("엑셀에 데이터가 없습니다.");
+
+    const rawHeaders = (aoa[0] ?? []).map((h) => String(h ?? "").trim());
+    const headerMap: Array<keyof Participant | null> = rawHeaders.map((h) => {
+        const key = HEADER_ALIASES[h] ?? HEADER_ALIASES[sanitizeHeader(h)];
+        return key ?? null;
     });
+
+    // name(이름) 컬럼이 없으면 템플릿 기준으로 강제 안내
+    const hasName = headerMap.includes("name");
+    if (!hasName) {
+        throw new Error("헤더(첫 줄)에 '이름' 컬럼이 필요합니다. 샘플 엑셀을 다운로드해서 형식을 맞춰주세요.");
+    }
+
+    const warnings: string[] = [];
+    const rows: Participant[] = [];
+
+    for (let i = 1; i < aoa.length; i++) {
+        const row = aoa[i] ?? [];
+        const obj: Participant = {name: ""};
+
+        headerMap.forEach((key, idx) => {
+            if (!key) return;
+            const v = row[idx];
+            const text = String(v ?? "").trim();
+            if (!text) return;
+
+            if (key === "email") obj.email = text;
+            else if (key === "phone") obj.phone = text;
+            else if (key === "company") obj.company = text;
+            else if (key === "role") obj.role = text;
+            else if (key === "ticketType") obj.ticketType = text;
+            else if (key === "note") obj.note = text;
+            else if (key === "name") obj.name = text;
+        });
+
+        if (!obj.name) {
+            warnings.push(`${i + 1}행: 이름이 비어 있어 제외했습니다.`);
+            continue;
+        }
+
+        rows.push(obj);
+    }
+
+    return {rows, warnings};
 }
 
 export default function ParticipantsPage({params}: Props) {
@@ -260,8 +302,9 @@ export default function ParticipantsPage({params}: Props) {
                 `업로드 완료: ${parsed.length.toLocaleString()}명 추가 (현재 ${dedup.length.toLocaleString()}명).` +
                 (warnings.length ? ` (주의 ${warnings.length}건)` : "")
             );
-        } catch (e: any) {
-            setError(e?.message ?? "업로드 처리 중 오류가 발생했습니다.");
+        } catch (e) {
+            if (e instanceof Error) setError(e.message);
+            else setError("업로드 처리 중 오류가 발생했습니다.");
         }
     };
 
@@ -279,20 +322,18 @@ export default function ParticipantsPage({params}: Props) {
         if (file) await handleFile(file);
     };
 
-    const downloadSample = () => {
-        const wb = makeSampleWorkbook();
-        const out = XLSX.write(wb, {bookType: "xlsx", type: "array"});
-        downloadBlob(new Blob([out], {type: "application/octet-stream"}), "participants-sample.xlsx");
+    const downloadSample = async () => {
+        const blob = await makeSampleWorkbookBlob();
+        downloadBlob(blob, "participants-sample.xlsx");
     };
 
-    const downloadCurrent = () => {
+    const downloadCurrent = async () => {
         if (!rows.length) {
             setInfo("현재 업로드된 데이터가 없습니다.");
             return;
         }
-        const wb = makeWorkbookFromParticipants(rows);
-        const out = XLSX.write(wb, {bookType: "xlsx", type: "array"});
-        downloadBlob(new Blob([out], {type: "application/octet-stream"}), `participants-${eventId}.xlsx`);
+        const blob = await makeWorkbookFromParticipantsBlob(rows);
+        downloadBlob(blob, `participants-${eventId}.xlsx`);
     };
 
     const clearAll = () => {
@@ -318,8 +359,10 @@ export default function ParticipantsPage({params}: Props) {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                    <button onClick={clearAll}
-                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button
+                        onClick={clearAll}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
                         초기화
                     </button>
                 </div>
@@ -354,16 +397,18 @@ export default function ParticipantsPage({params}: Props) {
 
             {/* 업로드 영역 */}
             <section className="mt-6">
-                <div onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                }}
-                     onDragLeave={() => setDragOver(false)}
-                     onDrop={onDrop}
-                     className={[
-                         "rounded-2xl border bg-white p-6 transition",
-                         dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
-                     ].join(" ")}>
+                <div
+                    onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    className={[
+                        "rounded-2xl border bg-white p-6 transition",
+                        dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
+                    ].join(" ")}
+                >
                     <div className="highlight-none flex flex-col items-center gap-2 text-center">
                         <div className="text-base font-semibold text-black">엑셀 파일을 드래그하여 업로드</div>
                         <div className="text-sm text-gray-700">.xlsx / .csv 지원 (첫 번째 시트, 첫 줄은 헤더)</div>
@@ -372,12 +417,16 @@ export default function ParticipantsPage({params}: Props) {
                         </div>
 
                         <div className="mt-3 flex gap-2">
-                            <button onClick={onPickFile}
-                                    className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+                            <button
+                                onClick={onPickFile}
+                                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                            >
                                 파일 선택
                             </button>
-                            <button onClick={downloadSample}
-                                    className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                            <button
+                                onClick={downloadSample}
+                                className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                            >
                                 샘플 다운로드
                             </button>
                         </div>
@@ -387,7 +436,8 @@ export default function ParticipantsPage({params}: Props) {
                             type="file"
                             accept=".xlsx,.xls,.csv"
                             className="hidden"
-                            onChange={onInputChange}/>
+                            onChange={onInputChange}
+                        />
                     </div>
                 </div>
             </section>
@@ -415,8 +465,10 @@ export default function ParticipantsPage({params}: Props) {
             <section className="mt-6 rounded-2xl border bg-white">
                 <div className="flex items-center justify-between gap-3 border-b p-4">
                     <h2 className="text-lg font-semibold text-black">업로드된 참가자 목록</h2>
-                    <button onClick={downloadCurrent}
-                        className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
+                    <button
+                        onClick={downloadCurrent}
+                        className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
                         엑셀 다운로드
                     </button>
                 </div>
