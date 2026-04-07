@@ -1,11 +1,8 @@
-// src/app/(protected)/participants/page.tsx
-
 "use client";
 
 import React, {useEffect, useMemo, useRef, useState} from "react";
-import ExcelJS from "exceljs";
-import {postJson} from "@/lib/api";
-import {formatPhoneKR, isValidEmail, normalizeEmail, normalizePhoneDigits} from "@/lib/validators";
+import {downloadCsvFile, parseSpreadsheetPreview, type SpreadsheetUploadRow,} from "@/lib/excel-preview";
+import {formatPhoneKR, isValidEmail, normalizeEmail, normalizePhoneDigits,} from "@/lib/validators";
 
 type Person = {
     id: string;
@@ -14,56 +11,20 @@ type Person = {
     phone?: string;
     company?: string;
     role?: string;
-    createdAt: string; // ISO
+    createdAt: string;
 };
 
-type UploadRow = {
-    name: string;
-    email?: string;
-    phone?: string;
-    company?: string;
-    role?: string;
-};
+type UploadRow = SpreadsheetUploadRow;
 
 const STORAGE_KEY = "event-manager:global-participants:v1";
-
-// 템플릿 헤더
 const TEMPLATE_HEADERS = ["이름", "이메일", "전화번호", "회사", "직함/역할"];
-
-// 업로드 엑셀 헤더 매핑
-const HEADER_ALIASES: Record<string, keyof UploadRow> = {
-    // ko
-    이름: "name",
-    이메일: "email",
-    전화번호: "phone",
-    휴대폰: "phone",
-    회사: "company",
-    소속: "company",
-    직함: "role",
-    역할: "role",
-    "직함/역할": "role",
-    // en
-    name: "name",
-    email: "email",
-    phone: "phone",
-    company: "company",
-    role: "role",
-    title: "role",
-};
 
 function uuid() {
     return `p_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function normalize(s: string) {
-    return (s ?? "").trim().toLowerCase();
-}
-
-function sanitizeHeader(h: unknown) {
-    return String(h ?? "")
-        .trim()
-        .replace(/\s+/g, "")
-        .toLowerCase();
+function normalize(value: string) {
+    return (value ?? "").trim().toLowerCase();
 }
 
 function formatKST(iso: string) {
@@ -77,32 +38,6 @@ function formatKST(iso: string) {
     });
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-}
-
-async function makeSampleWorkbookBlob() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("participants");
-
-    worksheet.addRow(TEMPLATE_HEADERS);
-    worksheet.addRow(["홍길동", "hong@example.com", "010-1234-5678", "BTWSoft", "매니저"]);
-    worksheet.addRow(["김철수", "kim@example.com", "010-0000-0000", "Sample Co.", "참가자"]);
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    return new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-}
-
-/** ✅ 테스트용 더미 데이터 (localStorage 비어있을 때 1회 주입용) */
 function makeMockParticipants(): Person[] {
     const now = Date.now();
     const mk = (n: number) => new Date(now - n * 1000 * 60 * 60).toISOString();
@@ -156,164 +91,29 @@ function makeMockParticipants(): Person[] {
     ];
 }
 
-function parseCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        const next = line[i + 1];
-
-        if (char === "\"") {
-            if (inQuotes && next === "\"") {
-                current += "\"";
-                i++;
-            } else {
-                inQuotes = !inQuotes;
-            }
-            continue;
-        }
-
-        if (char === "," && !inQuotes) {
-            result.push(current);
-            current = "";
-            continue;
-        }
-
-        current += char;
-    }
-
-    result.push(current);
-    return result.map((v) => v.trim());
-}
-
-function parseCsvText(text: string): unknown[][] {
-    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const lines = normalized
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-
-    return lines.map((line) => parseCsvLine(line));
-}
-
-// ✅ 엑셀/CSV → UploadRow[]
-async function parseFileToRows(
-    file: File
-): Promise<{ rows: UploadRow[]; warnings: string[] }> {
-    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-    const isCsv = ext === "csv";
-
-    const warnings: string[] = [];
-    let aoa: unknown[][] = [];
-
-    if (isCsv) {
-        const text = await file.text();
-        aoa = parseCsvText(text);
-    } else {
-        const buffer = await file.arrayBuffer();
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.load(buffer);
-
-        const worksheet = workbook.worksheets[0];
-        if (!worksheet) throw new Error("엑셀 시트를 찾지 못했습니다.");
-
-        aoa = [];
-        worksheet.eachRow((row) => {
-            const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-            aoa.push(values);
-        });
-    }
-
-    if (!aoa.length) throw new Error("엑셀에 데이터가 없습니다.");
-
-    const rawHeaders = (aoa[0] ?? []).map((h) => String(h ?? "").trim());
-    const headerMap: Array<keyof UploadRow | null> = rawHeaders.map((h) => {
-        const key = HEADER_ALIASES[h] ?? HEADER_ALIASES[sanitizeHeader(h)];
-        return key ?? null;
-    });
-
-    if (!headerMap.includes("name")) {
-        throw new Error(
-            "헤더(첫 줄)에 '이름' 컬럼이 필요합니다. 샘플 엑셀을 다운로드해서 형식을 맞춰주세요."
-        );
-    }
-
-    const rows: UploadRow[] = [];
-
-    for (let i = 1; i < aoa.length; i++) {
-        const row = aoa[i] ?? [];
-        const obj: UploadRow = {name: ""};
-
-        headerMap.forEach((key, idx) => {
-            if (!key) return;
-            const v = row[idx];
-            const text = String(v ?? "").trim();
-            if (!text) return;
-
-            if (key === "name") obj.name = text;
-            else if (key === "email") obj.email = text;
-            else if (key === "phone") obj.phone = text;
-            else if (key === "company") obj.company = text;
-            else if (key === "role") obj.role = text;
-        });
-
-        if (!obj.name) {
-            warnings.push(`${i + 1}행: 이름이 비어 있어 제외했습니다.`);
-            continue;
-        }
-
-        rows.push(obj);
-    }
-
-    return {rows, warnings};
-}
-
-/**
- * ✅ API 전송 스텁(미래 대비)
- * - 지금은 백엔드가 없으니 "연결만" 만들어둔다.
- * - 백엔드 구현되면 url만 맞추면 됨.
- */
-async function saveParticipantsToApi(rows: UploadRow[]) {
-    // TODO(백엔드): 실제 엔드포인트로 변경
-    const endpoint = "/api/participants/bulk";
-
-    // 백엔드가 아직 없으니 호출하면 404가 정상 → 그때 메시지로 안내
-    const result = await postJson<{ inserted: number; updated?: number }>(endpoint, {
-        items: rows,
-    });
-
-    return result;
-}
-
 export default function GlobalParticipantsPage() {
     const inputRef = useRef<HTMLInputElement | null>(null);
 
     const [items, setItems] = useState<Person[]>([]);
-    const [q, setQ] = useState("");
+    const [query, setQuery] = useState("");
 
-    // 수동 등록 폼
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [phone, setPhone] = useState("");
     const [company, setCompany] = useState("");
     const [role, setRole] = useState("");
 
-    // 업로드 상태
     const [dragOver, setDragOver] = useState(false);
     const [uploading, setUploading] = useState(false);
-
-    const [error, setError] = useState<string | null>(null);
-    const [info, setInfo] = useState<string | null>(null);
+    const [error, setError] = useState<string>("");
+    const [info, setInfo] = useState<string>("");
     const [warnings, setWarnings] = useState<string[]>([]);
+    const [lastUploadName, setLastUploadName] = useState("");
+    const [lastUploadSize, setLastUploadSize] = useState<number | null>(null);
 
-    // ✅ 로드: localStorage가 비어있으면 더미 데이터 1회 주입
     useEffect(() => {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
-
-            // 저장된 게 있으면 그대로 로드
             if (raw) {
                 const parsed = JSON.parse(raw) as Person[];
                 if (Array.isArray(parsed)) {
@@ -322,219 +122,230 @@ export default function GlobalParticipantsPage() {
                 }
             }
 
-            // 비어있으면 더미 데이터 주입
             const mocks = makeMockParticipants();
             localStorage.setItem(STORAGE_KEY, JSON.stringify(mocks));
             setItems(mocks);
             setInfo("테스트용 더미 데이터를 자동으로 주입했습니다.");
         } catch {
-            const mocks = makeMockParticipants();
-            setItems(mocks);
-            setInfo("localStorage 접근이 불가하여, 더미 데이터로 표시합니다.");
+            setItems(makeMockParticipants());
+            setInfo("localStorage 접근이 불가하여 더미 데이터로 표시합니다.");
         }
     }, []);
 
-    // 저장
     useEffect(() => {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
         } catch {
-            // ignore
+            // noop
         }
     }, [items]);
 
-    const filtered = useMemo(() => {
-        const keyword = normalize(q);
+    const filteredItems = useMemo(() => {
+        const keyword = normalize(query);
         if (!keyword) return items;
 
-        return items.filter((p) => {
-            const hay = `${p.name} ${p.email ?? ""} ${p.phone ?? ""} ${p.company ?? ""} ${
-                p.role ?? ""
-            }`.toLowerCase();
-            return hay.includes(keyword);
-        });
-    }, [items, q]);
+        return items.filter((item) =>
+            [item.name, item.email, item.phone, item.company, item.role]
+                .map((value) => normalize(String(value ?? "")))
+                .some((value) => value.includes(keyword))
+        );
+    }, [items, query]);
 
-    const onRegister = () => {
-        setError(null);
-        setInfo(null);
+    const handleAdd = () => {
+        setError("");
+        setInfo("");
 
-        const n = name.trim();
-        if (!n) {
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim();
+        const formattedPhone = formatPhoneKR(phone.trim());
+        const trimmedCompany = company.trim();
+        const trimmedRole = role.trim();
+
+        if (!trimmedName) {
             setError("이름은 필수입니다.");
             return;
         }
 
-        const e = email.trim();
-        if (e && !isValidEmail(e)) {
+        if (trimmedEmail && !isValidEmail(trimmedEmail)) {
             setError("이메일 형식이 올바르지 않습니다.");
             return;
         }
 
-        const eKey = e ? normalizeEmail(e) : "";
-        const pKey = phone.trim() ? normalizePhoneDigits(phone) : "";
+        const emailKey = normalizeEmail(trimmedEmail);
+        const phoneKey = normalizePhoneDigits(formattedPhone);
 
-        // email 또는 phone만 중복 기준 (이름은 제외)
-        const exists = items.some((p) => {
-            const oldE = p.email ? normalizeEmail(p.email) : "";
-            const oldP = p.phone ? normalizePhoneDigits(p.phone) : "";
-            return (eKey && oldE === eKey) || (pKey && oldP === pKey);
+        const duplicate = items.some((item) => {
+            if (emailKey && normalizeEmail(item.email ?? "") === emailKey) return true;
+            if (phoneKey && normalizePhoneDigits(item.phone ?? "") === phoneKey) return true;
+            return normalize(item.name) === normalize(trimmedName);
         });
 
-        if (exists) {
-            setError("이미 등록된 참가자입니다. (이메일 또는 이름 + 전화 기준)");
+        if (duplicate) {
+            setError("이미 존재하는 참가자입니다. 이름/이메일/전화번호를 확인해주세요.");
             return;
         }
 
-        const now = new Date().toISOString();
+        setItems((prev) => [
+            {
+                id: uuid(),
+                name: trimmedName,
+                email: trimmedEmail || undefined,
+                phone: formattedPhone || undefined,
+                company: trimmedCompany || undefined,
+                role: trimmedRole || undefined,
+                createdAt: new Date().toISOString(),
+            },
+            ...prev,
+        ]);
 
-        const newItem: Person = {
-            id: uuid(),
-            name: n,
-            email: email.trim() || undefined,
-            phone: phone.trim() || undefined,
-            company: company.trim() || undefined,
-            role: role.trim() || undefined,
-            createdAt: now,
-        };
-
-        setItems((prev) => [newItem, ...prev]);
-        setInfo("등록되었습니다.");
         setName("");
         setEmail("");
         setPhone("");
         setCompany("");
         setRole("");
+        setInfo("참가자를 추가했습니다.");
     };
 
-    const onDelete = (id: string) => setItems((prev) => prev.filter((p) => p.id !== id));
-
-    const onResetAll = () => {
-        setItems([]);
-        setQ("");
-        setWarnings([]);
-        setError(null);
-        setInfo("전체 참가자 목록을 초기화했습니다.");
-
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch {
-            // ignore
-        }
+    const handleDelete = (id: string) => {
+        setItems((prev) => prev.filter((item) => item.id !== id));
+        setInfo("참가자를 삭제했습니다.");
     };
 
-    const onInjectMocks = () => {
-        const mocks = makeMockParticipants();
-        setItems(mocks);
-        setQ("");
-        setWarnings([]);
-        setError(null);
-        setInfo(`더미 데이터 ${mocks.length}건을 주입했습니다.`);
-
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(mocks));
-        } catch {
-            // ignore
-        }
-    };
-
-    const downloadSample = async () => {
-        const blob = await makeSampleWorkbookBlob();
-        downloadBlob(blob, "global-participants-sample.xlsx");
-    };
-
-    const onPickFile = () => inputRef.current?.click();
-
-    const handleFile = async (file: File) => {
-        setError(null);
-        setInfo(null);
-        setWarnings([]);
-
-        const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-        if (!["xlsx", "xls", "csv"].includes(ext)) {
-            setError("지원하지 않는 형식입니다. .xlsx / .csv 파일만 업로드해주세요.");
-            return;
-        }
-
+    const handleUpload = async (file: File) => {
         setUploading(true);
+        setError("");
+        setInfo("");
+        setWarnings([]);
+
         try {
-            // 1) parse
-            const {rows, warnings} = await parseFileToRows(file);
-            setWarnings(warnings);
+            const result = await parseSpreadsheetPreview(file);
 
-            if (!rows.length) {
-                setInfo("업로드할 유효한 데이터가 없습니다.");
-                return;
-            }
+            const existingKeys = new Set(
+                items.map((item) => {
+                    const emailKey = normalizeEmail(item.email ?? "");
+                    const phoneKey = normalizePhoneDigits(item.phone ?? "");
+                    return `${normalize(item.name)}|${emailKey}|${phoneKey}`;
+                })
+            );
 
-            // 2) API 전송(현재는 없으므로 404가 날 수 있음)
-            const apiResult = await saveParticipantsToApi(rows);
+            const appended: Person[] = [];
+            let skippedDuplicates = 0;
 
-            if (!apiResult.ok) {
-                // ✅ 백엔드 아직 없을 때: 로컬로 저장해서 계속 테스트 가능하도록 처리
-                const now = new Date().toISOString();
-                const mapped: Person[] = rows.map((r) => ({
-                    id: uuid(),
-                    name: r.name,
-                    email: r.email,
-                    phone: r.phone,
-                    company: r.company,
-                    role: r.role,
-                    createdAt: now,
-                }));
+            result.rows.forEach((row: UploadRow) => {
+                const normalizedName = row.name.trim();
+                const normalizedEmail = normalizeEmail(row.email ?? "");
+                const formattedPhone = formatPhoneKR(row.phone ?? "");
+                const normalizedPhone = normalizePhoneDigits(formattedPhone);
 
-                // 중복 제거(이메일 또는 전화번호 기준) - 이름은 기준에서 제외
-                const merged = [...mapped, ...items];
-                const dedup: Person[] = [];
+                const key = `${normalize(normalizedName)}|${normalizedEmail}|${normalizedPhone}`;
 
-                const seenEmail = new Set<string>();
-                const seenPhone = new Set<string>();
-
-                for (const p of merged) {
-                    const e = p.email ? normalizeEmail(p.email) : "";
-                    const ph = p.phone ? normalizePhoneDigits(p.phone) : "";
-
-                    // ✅ email/phone 중 하나라도 기존에 있으면 중복 처리
-                    if (e && seenEmail.has(e)) continue;
-                    if (ph && seenPhone.has(ph)) continue;
-
-                    if (e) seenEmail.add(e);
-                    if (ph) seenPhone.add(ph);
-
-                    dedup.push(p);
+                if (existingKeys.has(key)) {
+                    skippedDuplicates += 1;
+                    return;
                 }
 
-                setItems(dedup);
+                existingKeys.add(key);
 
-                setInfo(
-                    `⚠️ API 미연결(status: ${apiResult.status ?? ""}) → 프로토타입용으로 localStorage에 저장했습니다. ` +
-                    `(추가 ${mapped.length}명 / 현재 ${dedup.length}명)`
-                );
-                return;
+                appended.push({
+                    id: uuid(),
+                    name: normalizedName,
+                    email: normalizedEmail || undefined,
+                    phone: formattedPhone || undefined,
+                    company: row.company?.trim() || undefined,
+                    role: row.role?.trim() || undefined,
+                    createdAt: new Date().toISOString(),
+                });
+            });
+
+            if (appended.length > 0) {
+                setItems((prev) => [...appended, ...prev]);
             }
 
-            // 3) API 성공한 경우(나중에 백엔드 생기면 이 루트로만 타게 됨)
-            setInfo(`API 등록 완료: ${apiResult.data.inserted}명`);
-            // 백엔드가 "저장된 최신 목록"을 리턴하면 여기서 setItems로 동기화하면 됨.
-        } catch (e) {
-            if (e instanceof Error) setError(e.message);
-            else setError("업로드 처리 중 오류가 발생했습니다.");
+            const nextWarnings = [...result.warnings];
+            if (skippedDuplicates > 0) {
+                nextWarnings.push(`중복 ${skippedDuplicates}건은 제외했습니다.`);
+            }
+
+            setWarnings(nextWarnings);
+            setLastUploadName(file.name);
+            setLastUploadSize(file.size);
+            setInfo(`업로드 완료: ${appended.length.toLocaleString()}명 추가되었습니다.`);
+        } catch (uploadError) {
+            setError(
+                uploadError instanceof Error
+                    ? uploadError.message
+                    : "업로드 처리 중 오류가 발생했습니다."
+            );
         } finally {
             setUploading(false);
         }
     };
 
-    const onInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) await handleFile(file);
-        e.target.value = "";
+    const onPickFile = () => {
+        inputRef.current?.click();
     };
 
-    const onDrop = async (e: React.DragEvent) => {
-        e.preventDefault();
+    const onInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            await handleUpload(file);
+        }
+        event.target.value = "";
+    };
+
+    const onDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
         setDragOver(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) await handleFile(file);
+
+        const file = event.dataTransfer.files?.[0];
+        if (file) {
+            await handleUpload(file);
+        }
+    };
+
+    const downloadSample = () => {
+        downloadCsvFile(
+            TEMPLATE_HEADERS,
+            [
+                ["홍길동", "hong@example.com", "010-1234-5678", "BTWSoft", "매니저"],
+                ["김철수", "kim@example.com", "010-0000-0000", "Sample Co.", "참가자"],
+            ],
+            "participants-sample.csv"
+        );
+    };
+
+    const downloadCurrent = () => {
+        if (!items.length) {
+            setInfo("현재 데이터가 없습니다.");
+            return;
+        }
+
+        downloadCsvFile(
+            TEMPLATE_HEADERS,
+            items.map((item) => [
+                item.name,
+                item.email ?? "",
+                item.phone ?? "",
+                item.company ?? "",
+                item.role ?? "",
+            ]),
+            "participants-current.csv"
+        );
+    };
+
+    const clearAll = () => {
+        setItems([]);
+        setWarnings([]);
+        setLastUploadName("");
+        setLastUploadSize(null);
+        setError("");
+        setInfo("참가자 데이터를 초기화했습니다.");
+
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch {
+            // noop
+        }
     };
 
     return (
@@ -542,31 +353,27 @@ export default function GlobalParticipantsPage() {
             <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-semibold text-black">Participants</h1>
-                    <p className="mt-1 text-sm text-gray-700">
-                        전체 참가자(마스터) 등록/조회 (프로토타입: localStorage 저장)
-                    </p>
+                    <p className="mt-1 text-sm text-gray-700">전역 참가자 관리 화면입니다.</p>
                 </div>
 
-                <div className="flex gap-2">
-                    <button
-                        onClick={onInjectMocks}
-                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                    >
-                        더미 데이터 주입
-                    </button>
-
+                <div className="flex flex-wrap gap-2">
                     <button
                         onClick={downloadSample}
                         className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
                     >
-                        샘플 엑셀 다운로드
+                        샘플 다운로드
                     </button>
-
                     <button
-                        onClick={onResetAll}
+                        onClick={downloadCurrent}
                         className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
                     >
-                        전체 초기화
+                        현재 데이터 다운로드
+                    </button>
+                    <button
+                        onClick={clearAll}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
+                        초기화
                     </button>
                 </div>
             </div>
@@ -576,51 +383,46 @@ export default function GlobalParticipantsPage() {
                     {error}
                 </div>
             ) : null}
+
             {info ? (
                 <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
                     {info}
                 </div>
             ) : null}
-            {warnings.length ? (
-                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                    <div className="font-semibold">주의 ({warnings.length}건)</div>
+
+            {warnings.length > 0 ? (
+                <div className="mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+                    <div className="font-semibold">확인 필요</div>
                     <ul className="mt-2 list-disc pl-5">
-                        {warnings.slice(0, 10).map((w, i) => (
-                            <li key={i}>{w}</li>
+                        {warnings.map((warning, index) => (
+                            <li key={`${warning}-${index}`}>{warning}</li>
                         ))}
                     </ul>
-                    {warnings.length > 10 ? (
-                        <div className="mt-2 text-xs">… 외 {warnings.length - 10}건</div>
-                    ) : null}
                 </div>
             ) : null}
 
-            {/* ✅ 엑셀 업로드 섹션 */}
-            <section className="mt-6 rounded-2xl border bg-white p-5">
-                <div className="flex items-end justify-between gap-3">
-                    <h2 className="text-lg font-semibold text-black">엑셀 업로드 (API 등록)</h2>
-                    <div className="text-xs text-gray-500">.xlsx / .csv (첫 줄 헤더 필요)</div>
-                </div>
-
+            <section className="mt-6">
                 <div
-                    onDragOver={(e) => {
-                        e.preventDefault();
+                    onDragOver={(event) => {
+                        event.preventDefault();
                         setDragOver(true);
                     }}
                     onDragLeave={() => setDragOver(false)}
                     onDrop={onDrop}
                     className={[
-                        "mt-4 rounded-2xl border bg-white p-6 transition",
+                        "rounded-2xl border bg-white p-6 transition",
                         dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
                     ].join(" ")}
                 >
                     <div className="flex flex-col items-center gap-2 text-center">
                         <div className="text-base font-semibold text-black">
-                            파일을 드래그하거나 선택하세요
+                            엑셀 파일을 드래그하여 업로드
                         </div>
                         <div className="text-sm text-gray-700">
-                            업로드 → (향후) API로 일괄 등록합니다. 현재는 API가 없어서 localStorage
-                            fallback 처리됩니다.
+                            .xlsx / .csv 지원, 첫 줄은 헤더입니다.
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            브라우저에서는 미리보기/사전검증만 수행하고, 실제 저장은 추후 백엔드에서 처리합니다.
                         </div>
 
                         <div className="mt-3 flex gap-2">
@@ -629,7 +431,7 @@ export default function GlobalParticipantsPage() {
                                 disabled={uploading}
                                 className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
                             >
-                                {uploading ? "업로드 중..." : "파일 선택"}
+                                {uploading ? "업로드 처리 중..." : "파일 선택"}
                             </button>
                             <button
                                 onClick={downloadSample}
@@ -642,7 +444,7 @@ export default function GlobalParticipantsPage() {
                         <input
                             ref={inputRef}
                             type="file"
-                            accept=".xlsx,.xls,.csv"
+                            accept=".xlsx,.csv"
                             className="hidden"
                             onChange={onInputChange}
                         />
@@ -650,183 +452,163 @@ export default function GlobalParticipantsPage() {
                 </div>
             </section>
 
-            {/* 수동 등록 폼(기존) */}
-            <section className="mt-6 rounded-2xl border bg-white p-5">
-                <div className="flex items-end justify-between gap-3">
-                    <h2 className="text-lg font-semibold text-black">참가자 등록</h2>
-                    <div className="text-xs text-gray-500">* 이름 필수</div>
+            <section className="mt-6 grid gap-4 md:grid-cols-4">
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">현재 참가자 수</div>
+                    <div className="mt-2 text-2xl font-semibold text-black">
+                        {items.length.toLocaleString()} 명
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">localStorage 임시 저장</div>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div>
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">필수 컬럼</div>
+                    <div className="mt-2 text-sm text-gray-800">이름(필수)</div>
+                    <div className="mt-1 text-xs text-gray-500">
+                        이메일/전화/회사/역할은 선택
+                    </div>
+                </div>
+
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">지원 형식</div>
+                    <div className="mt-2 text-sm text-gray-800">.xlsx / .csv</div>
+                    <div className="mt-1 text-xs text-gray-500">.xls는 제외했습니다.</div>
+                </div>
+
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">최근 업로드</div>
+                    {lastUploadName ? (
+                        <div className="mt-2 space-y-1 text-xs text-gray-600">
+                            <div className="truncate">{lastUploadName}</div>
+                            <div>{lastUploadSize != null ? lastUploadSize.toLocaleString() : "0"} bytes</div>
+                        </div>
+                    ) : (
+                        <div className="mt-2 text-xs text-gray-500">
+                            아직 업로드 이력이 없습니다.
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            <section className="mt-6 rounded-2xl border bg-white p-5">
+                <div className="flex flex-wrap items-end gap-3">
+                    <div className="min-w-[220px] flex-1">
                         <label className="text-sm font-medium text-gray-700">이름 *</label>
                         <input
                             value={name}
-                            onChange={(e) => setName(e.target.value)}
+                            onChange={(event) => setName(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="홍길동"
                         />
                     </div>
 
-                    <div>
+                    <div className="min-w-[220px] flex-1">
                         <label className="text-sm font-medium text-gray-700">이메일</label>
                         <input
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(event) => setEmail(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="hong@example.com"
                         />
                     </div>
 
-                    <div>
+                    <div className="min-w-[220px] flex-1">
                         <label className="text-sm font-medium text-gray-700">전화번호</label>
                         <input
                             value={phone}
-                            onChange={(e) => setPhone(formatPhoneKR(e.target.value))}
+                            onChange={(event) => setPhone(formatPhoneKR(event.target.value))}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="010-1234-5678"
                         />
                     </div>
 
-                    <div>
+                    <div className="min-w-[180px] flex-1">
                         <label className="text-sm font-medium text-gray-700">회사</label>
                         <input
                             value={company}
-                            onChange={(e) => setCompany(e.target.value)}
+                            onChange={(event) => setCompany(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="BTWSoft"
                         />
                     </div>
 
-                    <div>
+                    <div className="min-w-[180px] flex-1">
                         <label className="text-sm font-medium text-gray-700">직함/역할</label>
                         <input
                             value={role}
-                            onChange={(e) => setRole(e.target.value)}
+                            onChange={(event) => setRole(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="매니저"
                         />
                     </div>
 
-                    <div className="flex items-end">
-                        <button
-                            onClick={onRegister}
-                            className="w-full rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                        >
-                            등록
-                        </button>
-                    </div>
+                    <button
+                        onClick={handleAdd}
+                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                    >
+                        수동 추가
+                    </button>
                 </div>
             </section>
 
-            {/* 검색/통계 */}
-            <section className="mt-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                {/* 왼쪽: 검색 */}
-                <div className="w-full md:max-w-xl">
-                    <label className="text-sm font-medium text-gray-700">검색</label>
+            <section className="mt-6 rounded-2xl border bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+                    <div>
+                        <h2 className="text-lg font-semibold text-black">참가자 목록</h2>
+                        <p className="mt-1 text-sm text-gray-600">
+                            업로드/수동 등록된 데이터를 확인합니다.
+                        </p>
+                    </div>
+
                     <input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                        placeholder="이름 / 이메일 / 전화 / 회사 / 역할"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        className="w-full max-w-xs rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                        placeholder="이름, 이메일, 회사 검색"
                     />
                 </div>
 
-                {/* 오른쪽: 카운트(폭 고정) */}
-                <div className="flex shrink-0 justify-end gap-2 text-sm tabular-nums">
-                    <span className="inline-flex w-24 justify-center rounded-full border bg-white px-3 py-1">
-                      전체 {items.length}
-                    </span>
-                    <span className="inline-flex w-28 justify-center rounded-full border bg-white px-3 py-1">
-                        검색결과 {filtered.length}
-                    </span>
-                </div>
-            </section>
-
-            {/* 테이블 */}
-            <section className="mt-4 rounded-2xl border bg-white">
-                <div className="border-b p-4">
-                    <h2 className="text-lg font-semibold text-black">등록된 참가자</h2>
-                    <p className="mt-1 text-sm text-gray-600">
-                        TODO 프로토타입: DB 붙이면 페이징/정렬/필터 적용
-                    </p>
-                </div>
-
-                {/* ✅ 항상 동일한 테이블 구조 렌더링 (빈 상태도 tbody에서 처리) */}
-                <div className="overflow-x-auto">
-                    <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-sm">
-                        {/* ✅ 컬럼 폭 고정(데이터 길이로 가로폭이 흔들리는 것 방지) */}
-                        <colgroup>
-                            <col className="w-[140px]"/>
-                            <col className="w-[240px]"/>
-                            <col className="w-[160px]"/>
-                            <col className="w-[160px]"/>
-                            <col className="w-[120px]"/>
-                            <col className="w-[170px]"/>
-                            <col className="w-[90px]"/>
-                        </colgroup>
-
-                        <thead className="bg-gray-50 text-gray-700">
-                        <tr>
-                            <th className="border-b px-4 py-3 font-semibold">이름</th>
-                            <th className="border-b px-4 py-3 font-semibold">이메일</th>
-                            <th className="border-b px-4 py-3 font-semibold">전화번호</th>
-                            <th className="border-b px-4 py-3 font-semibold">회사</th>
-                            <th className="border-b px-4 py-3 font-semibold">역할</th>
-                            <th className="border-b px-4 py-3 font-semibold">등록일</th>
-                            <th className="border-b px-4 py-3 font-semibold">관리</th>
-                        </tr>
-                        </thead>
-
-                        <tbody>
-                        {filtered.length === 0 ? (
+                {filteredItems.length === 0 ? (
+                    <div className="p-6 text-sm text-gray-600">표시할 참가자가 없습니다.</div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+                            <thead className="bg-gray-50 text-gray-700">
                             <tr>
-                                <td
-                                    colSpan={7}
-                                    className="px-4 py-10 text-center text-sm text-gray-600"
-                                >
-                                    등록된 참가자가 없습니다.
-                                </td>
+                                <th className="border-b px-4 py-3 font-semibold">이름</th>
+                                <th className="border-b px-4 py-3 font-semibold">이메일</th>
+                                <th className="border-b px-4 py-3 font-semibold">전화번호</th>
+                                <th className="border-b px-4 py-3 font-semibold">회사</th>
+                                <th className="border-b px-4 py-3 font-semibold">직함/역할</th>
+                                <th className="border-b px-4 py-3 font-semibold">등록일시</th>
+                                <th className="border-b px-4 py-3 font-semibold">관리</th>
                             </tr>
-                        ) : (
-                            filtered.slice(0, 500).map((p) => (
-                                <tr key={p.id} className="odd:bg-white even:bg-gray-50/50">
-                                    <td className="border-b px-4 py-3 font-medium text-gray-900 truncate">
-                                        {p.name}
+                            </thead>
+                            <tbody>
+                            {filteredItems.map((item) => (
+                                <tr key={item.id} className="odd:bg-white even:bg-gray-50/50">
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.name}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.email ?? "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.phone ?? "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.company ?? "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.role ?? "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">
+                                        {formatKST(item.createdAt)}
                                     </td>
-                                    <td className="border-b px-4 py-3 text-gray-900 truncate">
-                                        {p.email ?? ""}
-                                    </td>
-                                    <td className="border-b px-4 py-3 text-gray-900 truncate">
-                                        {p.phone ?? ""}
-                                    </td>
-                                    <td className="border-b px-4 py-3 text-gray-900 truncate">
-                                        {p.company ?? ""}
-                                    </td>
-                                    <td className="border-b px-4 py-3 text-gray-900 truncate">
-                                        {p.role ?? ""}
-                                    </td>
-                                    <td className="border-b px-4 py-3 text-gray-700 truncate">
-                                        {formatKST(p.createdAt)}
-                                    </td>
-                                    <td className="border-b px-4 py-3">
+                                    <td className="border-b px-4 py-3 text-gray-900">
                                         <button
-                                            onClick={() => onDelete(p.id)}
-                                            className="w-full rounded-lg border px-3 py-1 text-xs font-medium text-gray-900 hover:bg-gray-50"
+                                            onClick={() => handleDelete(item.id)}
+                                            className="rounded-lg border px-3 py-1 text-xs hover:bg-gray-50"
                                         >
                                             삭제
                                         </button>
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                        </tbody>
-                    </table>
-
-                    {filtered.length > 500 ? (
-                        <div className="p-4 text-xs text-gray-500">최대 500건까지만 표시 중입니다.</div>
-                    ) : null}
-                </div>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </section>
         </main>
     );

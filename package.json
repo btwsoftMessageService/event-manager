@@ -2,11 +2,14 @@
   "name": "event-manager",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "dev": "dotenv -e .env.local -- next dev -H 0.0.0.0",
+    "dev": "next dev -p 51001 -H 0.0.0.0",
     "build": "next build",
     "start": "next start -p 51001 -H 0.0.0.0",
-    "lint": "eslint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8",
@@ -14,7 +17,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "xlsx": "^0.18.5"
+    "read-excel-file": "^5.8.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -22,7 +25,6 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",
