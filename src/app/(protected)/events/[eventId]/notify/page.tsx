@@ -2,10 +2,24 @@
 
 import {useEffect, useMemo, useRef, useState} from "react";
 import {useParams} from "next/navigation";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
-type Row = Record<string, string>;
+/* =========================================================
+ * 타입 정의
+ * ========================================================= */
 
+/**
+ * 업로드/원본 표 데이터를 담는 단순 행 타입
+ * - key: 헤더명
+ * - value: 셀 문자열 값
+ */
+type Row = {
+    [key: string]: string;
+};
+
+/**
+ * 발송 대상자 타입
+ */
 type Target = {
     id: string;
     name?: string;
@@ -14,166 +28,166 @@ type Target = {
     phone?: string;
 };
 
-const ACCEPT =
-    ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
-
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
-const MAX_PREVIEW_ROWS = 10;
-
-function normalizeHeader(value: string): string {
-    return value.trim().toLowerCase();
-}
-
-function isEmail(value: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function normalizeEmail(value: string): string {
-    return value.trim().toLowerCase();
-}
-
-function uuid(): string {
-    return `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function downloadBlob(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-}
-
-function parseCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i += 1) {
-        const char = line[i];
-        const next = line[i + 1];
-
-        if (char === '"') {
-            if (inQuotes && next === '"') {
-                current += '"';
-                i += 1;
-            } else {
-                inQuotes = !inQuotes;
-            }
-            continue;
-        }
-
-        if (char === "," && !inQuotes) {
-            result.push(current.trim());
-            current = "";
-            continue;
-        }
-
-        current += char;
-    }
-
-    result.push(current.trim());
-    return result;
-}
-
-function parseCsvText(text: string): string[][] {
-    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-    return normalized
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .map((line) => parseCsvLine(line));
-}
-
-async function buildSampleWorkbookBlob(): Promise<Blob> {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("participants");
-
-    worksheet.addRow(["name", "email", "company", "phone"]);
-    worksheet.addRow(["홍길동", "hong@example.com", "BTWSoft", "010-1234-5678"]);
-    worksheet.addRow(["김영희", "kim@example.com", "Sample Inc.", "010-2222-3333"]);
-    worksheet.addRow(["이철수", "lee@example.com", "Event Corp.", "010-9999-8888"]);
-
-    worksheet.columns = [
-        {width: 16},
-        {width: 30},
-        {width: 22},
-        {width: 18},
-    ];
-
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    return new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-}
-
-async function parseFile(
-    file: File
-): Promise<{ rows: Row[]; headers: string[] }> {
-    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-    const isCsv = ext === "csv";
-
-    let matrix: string[][] = [];
-
-    if (isCsv) {
-        const text = await file.text();
-        matrix = parseCsvText(text);
-    } else {
-        const buffer = await file.arrayBuffer();
-        const workbook = new Workbook();
-        await workbook.xlsx.load(buffer);
-
-        const worksheet = workbook.worksheets[0];
-        if (!worksheet) {
-            return {rows: [], headers: []};
-        }
-
-        worksheet.eachRow((row) => {
-            const rawValues = Array.isArray(row.values) ? row.values.slice(1) : [];
-            const values = rawValues.map((value) => String(value ?? "").trim());
-            matrix.push(values);
-        });
-    }
-
-    if (matrix.length === 0) {
-        return {rows: [], headers: []};
-    }
-
-    const headers = (matrix[0] ?? []).map((header) => String(header ?? "").trim());
-
-    const rows: Row[] = matrix.slice(1).map((line) => {
-        const obj: Row = {};
-        headers.forEach((header, index) => {
-            obj[header] = String(line[index] ?? "").trim();
-        });
-        return obj;
-    });
-
-    return {rows, headers};
-}
-
-type ParticipantMockRow = {
+/**
+ * mock 데이터용 구체 타입
+ * - Row[] 직접 대입 시 타입 추론 꼬임 방지
+ */
+type MockParticipantRow = {
     name: string;
     email: string;
     company: string;
     phone: string;
 };
 
+/* =========================================================
+ * 상수
+ * ========================================================= */
+
+const ACCEPT =
+    ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+const MAX_PREVIEW_ROWS = 10;
+
+/* =========================================================
+ * 공통 유틸
+ * ========================================================= */
+
+/** 헤더명 비교용 정규화 */
+function normalizeHeader(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+/** 이메일 유효성 검사 */
+function isEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** 이메일 중복 비교용 정규화 */
+function normalizeEmail(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+/** 단순 id 생성 */
+function uuid(): string {
+    return `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+/** Blob 다운로드 */
+function downloadBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+/* =========================================================
+ * xlsx 유틸
+ * ========================================================= */
+
+/**
+ * 샘플 엑셀 파일 생성
+ * - xlsx 하나만 사용
+ */
+function buildSampleWorkbookBlob(): Blob {
+    const rows = [
+        ["name", "email", "company", "phone"],
+        ["홍길동", "hong@example.com", "BTWSoft", "010-1234-5678"],
+        ["김영희", "kim@example.com", "Sample Inc.", "010-2222-3333"],
+        ["이철수", "lee@example.com", "Event Corp.", "010-9999-8888"],
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, "participants");
+
+    const arrayBuffer = XLSX.write(workbook, {
+        bookType: "xlsx",
+        type: "array",
+    });
+
+    return new Blob([arrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+}
+
+/**
+ * 파일을 읽어 headers + rows 로 변환
+ * - csv / xlsx / xls 지원
+ * - 첫 번째 시트 기준
+ * - 첫 줄은 헤더로 간주
+ */
+async function parseFile(
+    file: File
+): Promise<{ headers: string[]; rows: Row[] }> {
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+
+    let workbook: XLSX.WorkBook;
+
+    if (ext === "csv") {
+        const text = await file.text();
+        workbook = XLSX.read(text, {type: "string"});
+    } else {
+        const buffer = await file.arrayBuffer();
+        workbook = XLSX.read(buffer, {type: "array"});
+    }
+
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+        return {headers: [], rows: []};
+    }
+
+    const worksheet = workbook.Sheets[firstSheetName];
+    if (!worksheet) {
+        return {headers: [], rows: []};
+    }
+
+    const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(worksheet, {
+        header: 1,
+        defval: "",
+        blankrows: false,
+    });
+
+    if (!matrix.length) {
+        return {headers: [], rows: []};
+    }
+
+    const headerRow = Array.isArray(matrix[0]) ? matrix[0] : [];
+    const headers = headerRow.map((cell) => String(cell ?? "").trim());
+
+    const rows: Row[] = matrix.slice(1).map((line) => {
+        const row: Row = {};
+        headers.forEach((header, index) => {
+            row[header] = String(line?.[index] ?? "").trim();
+        });
+        return row;
+    });
+
+    return {headers, rows};
+}
+
+/* =========================================================
+ * mock 데이터 로딩
+ * ========================================================= */
+
+/**
+ * 실제 API 전까지 사용할 mock 참여자 목록
+ */
 async function loadEventParticipantsMock(
     _eventId: string
-): Promise<{ rows: Row[]; headers: string[] }> {
+): Promise<{ headers: string[]; rows: Row[] }> {
     await new Promise<void>((resolve) => {
         setTimeout(resolve, 150);
     });
 
     const headers = ["name", "email", "company", "phone"];
 
-    const rows: ParticipantMockRow[] = [
+    const baseRows: MockParticipantRow[] = [
         {
             name: "홍길동",
             email: "hong@example.com",
@@ -194,8 +208,19 @@ async function loadEventParticipantsMock(
         },
     ];
 
-    return {rows, headers};
+    const rows: Row[] = baseRows.map((item) => ({
+        name: item.name,
+        email: item.email,
+        company: item.company,
+        phone: item.phone,
+    }));
+
+    return {headers, rows};
 }
+
+/* =========================================================
+ * 페이지 컴포넌트
+ * ========================================================= */
 
 export default function NotifyPage() {
     const params = useParams();
@@ -209,24 +234,35 @@ export default function NotifyPage() {
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+    /* ===== UI 상태 ===== */
     const [dragOver, setDragOver] = useState(false);
     const [fileName, setFileName] = useState("");
 
+    /* ===== 메시지 상태 ===== */
     const [error, setError] = useState("");
     const [info, setInfo] = useState("");
 
+    /* ===== 원본 데이터 ===== */
     const [headers, setHeaders] = useState<string[]>([]);
     const [rows, setRows] = useState<Row[]>([]);
+
+    /* ===== 발송 대상 ===== */
     const [targets, setTargets] = useState<Target[]>([]);
 
+    /* ===== 수동 추가 ===== */
     const [manualName, setManualName] = useState("");
     const [manualEmail, setManualEmail] = useState("");
     const [manualEmailError, setManualEmailError] = useState("");
 
+    /* ===== 템플릿 ===== */
     const [subject, setSubject] = useState("[Event] 행사 안내");
     const [content, setContent] = useState(
         "안녕하세요, {{name}}님.\n\n행사에 초대드립니다.\n- 행사 ID: {{eventId}}\n\n감사합니다."
     );
+
+    /* =========================================================
+     * 헤더 자동 인식
+     * ========================================================= */
 
     const emailColumn = useMemo(() => {
         const candidates = ["email", "e-mail", "이메일", "메일"];
@@ -248,6 +284,10 @@ export default function NotifyPage() {
         return headers.find((header) => candidates.includes(normalizeHeader(header))) ?? "";
     }, [headers]);
 
+    /* =========================================================
+     * 파생 데이터
+     * ========================================================= */
+
     const validEmailRows = useMemo(() => {
         if (!emailColumn) return [];
         return rows.filter((row) => isEmail(row[emailColumn] ?? ""));
@@ -265,6 +305,10 @@ export default function NotifyPage() {
         return rows.slice(0, MAX_PREVIEW_ROWS);
     }, [rows]);
 
+    /* =========================================================
+     * 최초 mock 로드
+     * ========================================================= */
+
     useEffect(() => {
         let mounted = true;
 
@@ -274,7 +318,6 @@ export default function NotifyPage() {
                 setInfo("");
 
                 const result = await loadEventParticipantsMock(eventId);
-
                 if (!mounted) return;
 
                 setHeaders(result.headers);
@@ -292,11 +335,16 @@ export default function NotifyPage() {
         };
     }, [eventId]);
 
+    /* =========================================================
+     * 공통: 발송 대상 추가
+     * ========================================================= */
+
     const addTarget = (target: Omit<Target, "id">) => {
         const email = target.email.trim();
-
         if (!isEmail(email)) return;
-        if (targetEmailSet.has(normalizeEmail(email))) return;
+
+        const emailKey = normalizeEmail(email);
+        if (targetEmailSet.has(emailKey)) return;
 
         setTargets((prev) => [
             {
@@ -309,6 +357,10 @@ export default function NotifyPage() {
             ...prev,
         ]);
     };
+
+    /* =========================================================
+     * 파일 업로드 처리
+     * ========================================================= */
 
     const handleFile = async (file: File) => {
         setError("");
@@ -406,20 +458,26 @@ export default function NotifyPage() {
         if (file) {
             await handleFile(file);
         }
+
+        // 같은 파일 재선택 허용
         event.target.value = "";
     };
 
-    const downloadSample = async () => {
-        setError("");
-        setInfo("");
-
+    const downloadSample = () => {
         try {
-            const blob = await buildSampleWorkbookBlob();
+            setError("");
+            setInfo("");
+
+            const blob = buildSampleWorkbookBlob();
             downloadBlob(blob, "participants_sample.xlsx");
         } catch {
             setError("샘플 파일 생성에 실패했습니다.");
         }
     };
+
+    /* =========================================================
+     * 행사 참여자 -> 발송 대상 추가
+     * ========================================================= */
 
     const addTargetFromRow = (row: Row) => {
         if (!emailColumn) {
@@ -472,6 +530,10 @@ export default function NotifyPage() {
         setInfo(`유효 이메일 ${nextTargets.length}건을 발송 대상자에 추가했습니다.`);
     };
 
+    /* =========================================================
+     * 수동 발송 대상 추가
+     * ========================================================= */
+
     const addManualTarget = () => {
         setError("");
         setInfo("");
@@ -506,6 +568,10 @@ export default function NotifyPage() {
         setInfo("수동 발송 대상자가 추가되었습니다.");
     };
 
+    /* =========================================================
+     * 발송 대상 관리
+     * ========================================================= */
+
     const removeTarget = (id: string) => {
         setTargets((prev) => prev.filter((target) => target.id !== id));
     };
@@ -514,6 +580,10 @@ export default function NotifyPage() {
         setTargets([]);
         setInfo("발송 대상자를 모두 비웠습니다.");
     };
+
+    /* =========================================================
+     * 발송 요청 (개발용)
+     * ========================================================= */
 
     const requestSend = () => {
         const emails = targets.map((target) => target.email);
@@ -536,6 +606,7 @@ export default function NotifyPage() {
 
     return (
         <main className="p-6 text-gray-900">
+            {/* 상단 헤더 */}
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-semibold text-black">Notify</h1>
@@ -550,6 +621,7 @@ export default function NotifyPage() {
                 </button>
             </div>
 
+            {/* 안내/에러 메시지 */}
             {error ? (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                     {error}
@@ -562,7 +634,9 @@ export default function NotifyPage() {
                 </div>
             ) : null}
 
+            {/* 업로드 / 메일 템플릿 */}
             <section className="mt-6 grid gap-6 lg:grid-cols-2">
+                {/* 파일 업로드 */}
                 <div className="rounded-2xl border bg-white p-5">
                     <h2 className="text-lg font-semibold text-black">파일 업로드</h2>
                     <p className="mt-1 text-sm text-gray-600">
@@ -605,6 +679,7 @@ export default function NotifyPage() {
                     </div>
                 </div>
 
+                {/* 메일 템플릿 */}
                 <div className="rounded-2xl border bg-white p-5">
                     <h2 className="text-lg font-semibold text-black">메일 템플릿</h2>
 
@@ -638,6 +713,7 @@ export default function NotifyPage() {
                 </div>
             </section>
 
+            {/* 수동 발송 대상 추가 */}
             <section className="mt-6 rounded-2xl border bg-white p-5">
                 <div>
                     <h2 className="text-lg font-semibold text-black">수동 발송 대상 추가</h2>
@@ -714,6 +790,7 @@ export default function NotifyPage() {
                 </div>
             </section>
 
+            {/* 발송 대상자 목록 */}
             <section className="mt-6 rounded-2xl border bg-white p-5">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                     <div>
@@ -772,6 +849,7 @@ export default function NotifyPage() {
                 )}
             </section>
 
+            {/* 행사 참여자 목록 */}
             <section className="mt-6 rounded-2xl border bg-white p-5">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                     <div>
