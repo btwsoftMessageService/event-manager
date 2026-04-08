@@ -1,444 +1,397 @@
+// src/app/(protected)/events/[eventId]/notify/page.tsx
 "use client";
 
-import {useEffect, useMemo, useRef, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import {useParams} from "next/navigation";
-import * as XLSX from "xlsx";
+import {downloadCsvFile, parseSpreadsheetPreview, type SpreadsheetUploadRow,} from "@/lib/excel-preview";
+import {formatPhoneKR, isValidEmail, normalizeEmail, normalizePhoneDigits,} from "@/lib/validators";
 
-/* =========================================================
- * 타입 정의
- * ========================================================= */
+type RecipientStatus = "draft" | "ready" | "sent" | "failed";
 
-/**
- * 업로드/원본 표 데이터를 담는 단순 행 타입
- * - key: 헤더명
- * - value: 셀 문자열 값
- */
-type Row = {
-    [key: string]: string;
-};
-
-/**
- * 발송 대상자 타입
- */
-type Target = {
+type Recipient = {
     id: string;
-    name?: string;
-    email: string;
-    company?: string;
-    phone?: string;
-};
-
-/**
- * mock 데이터용 구체 타입
- * - Row[] 직접 대입 시 타입 추론 꼬임 방지
- */
-type MockParticipantRow = {
+    eventId: string;
     name: string;
-    email: string;
-    company: string;
-    phone: string;
+    email?: string;
+    phone?: string;
+    company?: string;
+    role?: string;
+    status: RecipientStatus;
+    sentAt?: string;
+    createdAt: string;
 };
 
-/* =========================================================
- * 상수
- * ========================================================= */
+type UploadRow = SpreadsheetUploadRow;
 
-const ACCEPT =
-    ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
+const TEMPLATE_HEADERS = ["이름", "이메일", "전화번호", "회사", "직함/역할"];
+const DEFAULT_SUBJECT = "[행사 안내] 참가 관련 안내드립니다.";
+const DEFAULT_MESSAGE = `안녕하세요.
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
-const MAX_PREVIEW_ROWS = 10;
+행사 참가 관련 안내드립니다.
+본 메일은 행사 운영 시스템에서 발송되는 예시 화면입니다.
 
-/* =========================================================
- * 공통 유틸
- * ========================================================= */
+감사합니다.`;
 
-/** 헤더명 비교용 정규화 */
-function normalizeHeader(value: string): string {
-    return value.trim().toLowerCase();
+function getStorageKey(eventId: string) {
+    return `event-manager:event:${eventId}:notify-recipients:v1`;
 }
 
-/** 이메일 유효성 검사 */
-function isEmail(value: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+function uuid() {
+    return `nt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-/** 이메일 중복 비교용 정규화 */
-function normalizeEmail(value: string): string {
-    return value.trim().toLowerCase();
+function normalize(value: string) {
+    return (value ?? "").trim().toLowerCase();
 }
 
-/** 단순 id 생성 */
-function uuid(): string {
-    return `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+function formatKST(iso?: string) {
+    if (!iso) return "-";
 
-/** Blob 다운로드 */
-function downloadBlob(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-}
-
-/* =========================================================
- * xlsx 유틸
- * ========================================================= */
-
-/**
- * 샘플 엑셀 파일 생성
- * - xlsx 하나만 사용
- */
-function buildSampleWorkbookBlob(): Blob {
-    const rows = [
-        ["name", "email", "company", "phone"],
-        ["홍길동", "hong@example.com", "BTWSoft", "010-1234-5678"],
-        ["김영희", "kim@example.com", "Sample Inc.", "010-2222-3333"],
-        ["이철수", "lee@example.com", "Event Corp.", "010-9999-8888"],
-    ];
-
-    const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "participants");
-
-    const arrayBuffer = XLSX.write(workbook, {
-        bookType: "xlsx",
-        type: "array",
-    });
-
-    return new Blob([arrayBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    return new Date(iso).toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
     });
 }
 
-/**
- * 파일을 읽어 headers + rows 로 변환
- * - csv / xlsx / xls 지원
- * - 첫 번째 시트 기준
- * - 첫 줄은 헤더로 간주
- */
-async function parseFile(
-    file: File
-): Promise<{ headers: string[]; rows: Row[] }> {
-    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+function getStatusLabel(status: RecipientStatus) {
+    if (status === "draft") return "초안";
+    if (status === "ready") return "발송대기";
+    if (status === "sent") return "발송완료";
+    return "실패";
+}
 
-    let workbook: XLSX.WorkBook;
-
-    if (ext === "csv") {
-        const text = await file.text();
-        workbook = XLSX.read(text, {type: "string"});
-    } else {
-        const buffer = await file.arrayBuffer();
-        workbook = XLSX.read(buffer, {type: "array"});
+function getStatusBadgeClass(status: RecipientStatus) {
+    if (status === "draft") {
+        return "border-gray-200 bg-gray-50 text-gray-700";
     }
-
-    const firstSheetName = workbook.SheetNames[0];
-    if (!firstSheetName) {
-        return {headers: [], rows: []};
+    if (status === "ready") {
+        return "border-blue-200 bg-blue-50 text-blue-700";
     }
-
-    const worksheet = workbook.Sheets[firstSheetName];
-    if (!worksheet) {
-        return {headers: [], rows: []};
+    if (status === "sent") {
+        return "border-green-200 bg-green-50 text-green-700";
     }
-
-    const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(worksheet, {
-        header: 1,
-        defval: "",
-        blankrows: false,
-    });
-
-    if (!matrix.length) {
-        return {headers: [], rows: []};
-    }
-
-    const headerRow = Array.isArray(matrix[0]) ? matrix[0] : [];
-    const headers = headerRow.map((cell) => String(cell ?? "").trim());
-
-    const rows: Row[] = matrix.slice(1).map((line) => {
-        const row: Row = {};
-        headers.forEach((header, index) => {
-            row[header] = String(line?.[index] ?? "").trim();
-        });
-        return row;
-    });
-
-    return {headers, rows};
+    return "border-red-200 bg-red-50 text-red-700";
 }
 
-/* =========================================================
- * mock 데이터 로딩
- * ========================================================= */
+function makeMockRecipients(eventId: string): Recipient[] {
+    const now = Date.now();
+    const mk = (n: number) => new Date(now - n * 1000 * 60 * 60).toISOString();
 
-/**
- * 실제 API 전까지 사용할 mock 참여자 목록
- */
-async function loadEventParticipantsMock(
-    _eventId: string
-): Promise<{ headers: string[]; rows: Row[] }> {
-    await new Promise<void>((resolve) => {
-        setTimeout(resolve, 150);
-    });
-
-    const headers = ["name", "email", "company", "phone"];
-
-    const baseRows: MockParticipantRow[] = [
+    return [
         {
+            id: uuid(),
+            eventId,
             name: "홍길동",
             email: "hong@example.com",
-            company: "BTWSoft",
             phone: "010-1234-5678",
+            company: "BTWSoft",
+            role: "매니저",
+            status: "ready",
+            createdAt: mk(1),
         },
         {
-            name: "김영희",
+            id: uuid(),
+            eventId,
+            name: "김철수",
             email: "kim@example.com",
-            company: "Sample Inc.",
-            phone: "010-2222-3333",
+            phone: "010-0000-0000",
+            company: "Sample Co.",
+            role: "참가자",
+            status: "sent",
+            sentAt: mk(2),
+            createdAt: mk(5),
         },
         {
-            name: "이철수",
-            email: "lee@example.com",
-            company: "Event Corp.",
-            phone: "010-9999-8888",
+            id: uuid(),
+            eventId,
+            name: "이영희",
+            email: "",
+            phone: "010-2222-3333",
+            company: "Alpha Lab",
+            role: "운영",
+            status: "draft",
+            createdAt: mk(10),
         },
     ];
-
-    const rows: Row[] = baseRows.map((item) => ({
-        name: item.name,
-        email: item.email,
-        company: item.company,
-        phone: item.phone,
-    }));
-
-    return {headers, rows};
 }
 
-/* =========================================================
- * 페이지 컴포넌트
- * ========================================================= */
+export default function EventNotifyPage() {
+    const params = useParams<{ eventId: string }>();
+    const eventId = String(params?.eventId ?? "");
+    const storageKey = getStorageKey(eventId);
 
-export default function NotifyPage() {
-    const params = useParams();
-    const eventIdParam = params?.eventId;
-    const eventId =
-        typeof eventIdParam === "string"
-            ? eventIdParam
-            : Array.isArray(eventIdParam)
-                ? (eventIdParam[0] ?? "")
-                : "";
+    const inputRef = useRef<HTMLInputElement | null>(null);
 
-    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [items, setItems] = useState<Recipient[]>([]);
+    const [query, setQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState<"all" | RecipientStatus>("all");
+    const [onlyValidEmail, setOnlyValidEmail] = useState(false);
 
-    /* ===== UI 상태 ===== */
+    const [subject, setSubject] = useState(DEFAULT_SUBJECT);
+    const [message, setMessage] = useState(DEFAULT_MESSAGE);
+
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [phone, setPhone] = useState("");
+    const [company, setCompany] = useState("");
+    const [role, setRole] = useState("");
+
     const [dragOver, setDragOver] = useState(false);
-    const [fileName, setFileName] = useState("");
-
-    /* ===== 메시지 상태 ===== */
+    const [uploading, setUploading] = useState(false);
+    const [sending, setSending] = useState(false);
     const [error, setError] = useState("");
     const [info, setInfo] = useState("");
-
-    /* ===== 원본 데이터 ===== */
-    const [headers, setHeaders] = useState<string[]>([]);
-    const [rows, setRows] = useState<Row[]>([]);
-
-    /* ===== 발송 대상 ===== */
-    const [targets, setTargets] = useState<Target[]>([]);
-
-    /* ===== 수동 추가 ===== */
-    const [manualName, setManualName] = useState("");
-    const [manualEmail, setManualEmail] = useState("");
-    const [manualEmailError, setManualEmailError] = useState("");
-
-    /* ===== 템플릿 ===== */
-    const [subject, setSubject] = useState("[Event] 행사 안내");
-    const [content, setContent] = useState(
-        "안녕하세요, {{name}}님.\n\n행사에 초대드립니다.\n- 행사 ID: {{eventId}}\n\n감사합니다."
-    );
-
-    /* =========================================================
-     * 헤더 자동 인식
-     * ========================================================= */
-
-    const emailColumn = useMemo(() => {
-        const candidates = ["email", "e-mail", "이메일", "메일"];
-        return headers.find((header) => candidates.includes(normalizeHeader(header))) ?? "";
-    }, [headers]);
-
-    const nameColumn = useMemo(() => {
-        const candidates = ["name", "이름"];
-        return headers.find((header) => candidates.includes(normalizeHeader(header))) ?? "";
-    }, [headers]);
-
-    const companyColumn = useMemo(() => {
-        const candidates = ["company", "회사", "소속"];
-        return headers.find((header) => candidates.includes(normalizeHeader(header))) ?? "";
-    }, [headers]);
-
-    const phoneColumn = useMemo(() => {
-        const candidates = ["phone", "전화번호", "휴대폰"];
-        return headers.find((header) => candidates.includes(normalizeHeader(header))) ?? "";
-    }, [headers]);
-
-    /* =========================================================
-     * 파생 데이터
-     * ========================================================= */
-
-    const validEmailRows = useMemo(() => {
-        if (!emailColumn) return [];
-        return rows.filter((row) => isEmail(row[emailColumn] ?? ""));
-    }, [rows, emailColumn]);
-
-    const targetEmailSet = useMemo(() => {
-        const set = new Set<string>();
-        targets.forEach((target) => {
-            set.add(normalizeEmail(target.email));
-        });
-        return set;
-    }, [targets]);
-
-    const previewRows = useMemo(() => {
-        return rows.slice(0, MAX_PREVIEW_ROWS);
-    }, [rows]);
-
-    /* =========================================================
-     * 최초 mock 로드
-     * ========================================================= */
+    const [warnings, setWarnings] = useState<string[]>([]);
+    const [lastUploadName, setLastUploadName] = useState("");
+    const [lastUploadSize, setLastUploadSize] = useState<number | null>(null);
 
     useEffect(() => {
-        let mounted = true;
+        if (!eventId) return;
 
-        const run = async () => {
-            try {
-                setError("");
-                setInfo("");
-
-                const result = await loadEventParticipantsMock(eventId);
-                if (!mounted) return;
-
-                setHeaders(result.headers);
-                setRows(result.rows);
-            } catch {
-                if (!mounted) return;
-                setError("행사 참여자 목록 불러오기에 실패했습니다.");
+        try {
+            const raw = localStorage.getItem(storageKey);
+            if (raw) {
+                const parsed = JSON.parse(raw) as Recipient[];
+                if (Array.isArray(parsed)) {
+                    setItems(parsed);
+                    return;
+                }
             }
+
+            const mocks = makeMockRecipients(eventId);
+            localStorage.setItem(storageKey, JSON.stringify(mocks));
+            setItems(mocks);
+            setInfo("알림 발송용 테스트 데이터를 자동으로 주입했습니다.");
+        } catch {
+            setItems(makeMockRecipients(eventId));
+            setInfo("localStorage 접근이 불가하여 더미 데이터로 표시합니다.");
+        }
+    }, [eventId, storageKey]);
+
+    useEffect(() => {
+        if (!eventId) return;
+
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(items));
+        } catch {
+            // noop
+        }
+    }, [eventId, items, storageKey]);
+
+    const filteredItems = useMemo(() => {
+        const keyword = normalize(query);
+
+        return items.filter((item) => {
+            const matchedQuery =
+                !keyword ||
+                [item.name, item.email, item.phone, item.company, item.role]
+                    .map((value) => normalize(String(value ?? "")))
+                    .some((value) => value.includes(keyword));
+
+            const matchedStatus = statusFilter === "all" || item.status === statusFilter;
+            const matchedEmail =
+                !onlyValidEmail || (item.email ? isValidEmail(item.email) : false);
+
+            return matchedQuery && matchedStatus && matchedEmail;
+        });
+    }, [items, onlyValidEmail, query, statusFilter]);
+
+    const stats = useMemo(() => {
+        const sent = items.filter((item) => item.status === "sent").length;
+        const ready = items.filter((item) => item.status === "ready").length;
+        const failed = items.filter((item) => item.status === "failed").length;
+        const validEmailCount = items.filter(
+            (item) => item.email && isValidEmail(item.email)
+        ).length;
+
+        return {
+            total: items.length,
+            sent,
+            ready,
+            failed,
+            validEmailCount,
         };
+    }, [items]);
 
-        void run();
+    const lastUploadSizeText =
+        lastUploadSize != null ? lastUploadSize.toLocaleString() : "0";
 
-        return () => {
-            mounted = false;
-        };
-    }, [eventId]);
-
-    /* =========================================================
-     * 공통: 발송 대상 추가
-     * ========================================================= */
-
-    const addTarget = (target: Omit<Target, "id">) => {
-        const email = target.email.trim();
-        if (!isEmail(email)) return;
-
-        const emailKey = normalizeEmail(email);
-        if (targetEmailSet.has(emailKey)) return;
-
-        setTargets((prev) => [
-            {
-                id: uuid(),
-                email,
-                name: target.name?.trim() || "",
-                company: target.company?.trim() || "",
-                phone: target.phone?.trim() || "",
-            },
-            ...prev,
-        ]);
-    };
-
-    /* =========================================================
-     * 파일 업로드 처리
-     * ========================================================= */
-
-    const handleFile = async (file: File) => {
+    const handleAdd = () => {
         setError("");
         setInfo("");
 
-        const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+        const trimmedName = name.trim();
+        const trimmedEmail = email.trim();
+        const formattedPhone = formatPhoneKR(phone.trim());
+        const trimmedCompany = company.trim();
+        const trimmedRole = role.trim();
 
-        if (!["xlsx", "xls", "csv"].includes(ext)) {
-            setError("지원하지 않는 파일 형식입니다. (.xlsx / .xls / .csv)");
+        if (!trimmedName) {
+            setError("이름은 필수입니다.");
             return;
         }
 
-        if (file.size > MAX_FILE_SIZE) {
-            setError("파일은 2MB 이하만 업로드 가능합니다.");
+        if (trimmedEmail && !isValidEmail(trimmedEmail)) {
+            setError("이메일 형식이 올바르지 않습니다.");
             return;
         }
+
+        const emailKey = normalizeEmail(trimmedEmail);
+        const phoneKey = normalizePhoneDigits(formattedPhone);
+
+        const duplicate = items.some((item) => {
+            if (emailKey && normalizeEmail(item.email ?? "") === emailKey) return true;
+            if (phoneKey && normalizePhoneDigits(item.phone ?? "") === phoneKey) return true;
+            return normalize(item.name) === normalize(trimmedName);
+        });
+
+        if (duplicate) {
+            setError("이미 존재하는 수신자입니다. 이름/이메일/전화번호를 확인해주세요.");
+            return;
+        }
+
+        setItems((prev) => [
+            {
+                id: uuid(),
+                eventId,
+                name: trimmedName,
+                email: trimmedEmail || undefined,
+                phone: formattedPhone || undefined,
+                company: trimmedCompany || undefined,
+                role: trimmedRole || undefined,
+                status: trimmedEmail && isValidEmail(trimmedEmail) ? "ready" : "draft",
+                createdAt: new Date().toISOString(),
+            },
+            ...prev,
+        ]);
+
+        setName("");
+        setEmail("");
+        setPhone("");
+        setCompany("");
+        setRole("");
+        setInfo("수신자를 추가했습니다.");
+    };
+
+    const handleDelete = (id: string) => {
+        setItems((prev) => prev.filter((item) => item.id !== id));
+        setInfo("수신자를 삭제했습니다.");
+    };
+
+    const handleStatusChange = (id: string, nextStatus: RecipientStatus) => {
+        setItems((prev) =>
+            prev.map((item) =>
+                item.id === id
+                    ? {
+                        ...item,
+                        status: nextStatus,
+                        sentAt: nextStatus === "sent" ? new Date().toISOString() : undefined,
+                    }
+                    : item
+            )
+        );
+        setInfo("수신자 상태를 변경했습니다.");
+    };
+
+    const handleUpload = async (file: File) => {
+        setUploading(true);
+        setError("");
+        setInfo("");
+        setWarnings([]);
 
         try {
-            setFileName(file.name);
+            const result = await parseSpreadsheetPreview(file);
 
-            const parsed = await parseFile(file);
-            const uploadedHeaders = parsed.headers;
-            const uploadedRows = parsed.rows;
+            const existingKeys = new Set(
+                items.map((item) => {
+                    const emailKey = normalizeEmail(item.email ?? "");
+                    const phoneKey = normalizePhoneDigits(item.phone ?? "");
+                    return `${normalize(item.name)}|${emailKey}|${phoneKey}`;
+                })
+            );
 
-            const uploadedEmailColumn =
-                uploadedHeaders.find((header) =>
-                    ["email", "e-mail", "이메일", "메일"].includes(normalizeHeader(header))
-                ) ?? "";
+            const appended: Recipient[] = [];
+            let skippedDuplicates = 0;
+            let skippedInvalidEmail = 0;
 
-            const uploadedNameColumn =
-                uploadedHeaders.find((header) =>
-                    ["name", "이름"].includes(normalizeHeader(header))
-                ) ?? "";
+            result.rows.forEach((row: UploadRow) => {
+                const normalizedName = row.name.trim();
+                const normalizedEmail = normalizeEmail(row.email ?? "");
+                const formattedPhone = formatPhoneKR(row.phone ?? "");
+                const normalizedPhone = normalizePhoneDigits(formattedPhone);
 
-            const uploadedCompanyColumn =
-                uploadedHeaders.find((header) =>
-                    ["company", "회사", "소속"].includes(normalizeHeader(header))
-                ) ?? "";
+                const key = `${normalize(normalizedName)}|${normalizedEmail}|${normalizedPhone}`;
 
-            const uploadedPhoneColumn =
-                uploadedHeaders.find((header) =>
-                    ["phone", "전화번호", "휴대폰"].includes(normalizeHeader(header))
-                ) ?? "";
+                if (existingKeys.has(key)) {
+                    skippedDuplicates += 1;
+                    return;
+                }
 
-            if (!uploadedEmailColumn) {
-                setError("업로드 파일에서 이메일 컬럼을 찾지 못했습니다. (email/이메일/메일 필요)");
-                return;
-            }
+                const nextStatus: RecipientStatus =
+                    normalizedEmail && isValidEmail(normalizedEmail) ? "ready" : "draft";
 
-            const existingEmails = new Set<string>(Array.from(targetEmailSet));
-            const nextTargets: Target[] = [];
+                if (normalizedEmail && !isValidEmail(normalizedEmail)) {
+                    skippedInvalidEmail += 1;
+                }
 
-            uploadedRows.forEach((row) => {
-                const email = (row[uploadedEmailColumn] ?? "").trim();
-                if (!isEmail(email)) return;
+                existingKeys.add(key);
 
-                const emailKey = normalizeEmail(email);
-                if (existingEmails.has(emailKey)) return;
-
-                existingEmails.add(emailKey);
-
-                nextTargets.push({
+                appended.push({
                     id: uuid(),
-                    email,
-                    name: uploadedNameColumn ? (row[uploadedNameColumn] ?? "").trim() : "",
-                    company: uploadedCompanyColumn ? (row[uploadedCompanyColumn] ?? "").trim() : "",
-                    phone: uploadedPhoneColumn ? (row[uploadedPhoneColumn] ?? "").trim() : "",
+                    eventId,
+                    name: normalizedName,
+                    email: normalizedEmail || undefined,
+                    phone: formattedPhone || undefined,
+                    company: row.company?.trim() || undefined,
+                    role: row.role?.trim() || undefined,
+                    status: nextStatus,
+                    createdAt: new Date().toISOString(),
                 });
             });
 
-            if (nextTargets.length > 0) {
-                setTargets((prev) => [...nextTargets, ...prev]);
+            if (appended.length > 0) {
+                setItems((prev) => [...appended, ...prev]);
             }
 
-            setInfo(`업로드 완료: 발송 대상자 ${nextTargets.length}명 추가됨`);
-        } catch {
-            setError("파일 파싱에 실패했습니다.");
+            const nextWarnings = [...result.warnings];
+            if (skippedDuplicates > 0) {
+                nextWarnings.push(`중복 ${skippedDuplicates}건은 제외했습니다.`);
+            }
+            if (skippedInvalidEmail > 0) {
+                nextWarnings.push(
+                    `이메일 형식이 올바르지 않은 ${skippedInvalidEmail}건은 발송대기 대신 초안 상태로 등록했습니다.`
+                );
+            }
+
+            setWarnings(nextWarnings);
+            setLastUploadName(file.name);
+            setLastUploadSize(file.size);
+            setInfo(`업로드 완료: ${appended.length.toLocaleString()}명 추가되었습니다.`);
+        } catch (uploadError) {
+            setError(
+                uploadError instanceof Error
+                    ? uploadError.message
+                    : "업로드 처리 중 오류가 발생했습니다."
+            );
+        } finally {
+            setUploading(false);
         }
+    };
+
+    const onPickFile = () => {
+        inputRef.current?.click();
+    };
+
+    const onInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            await handleUpload(file);
+        }
+        event.target.value = "";
     };
 
     const onDrop = async (event: React.DragEvent<HTMLDivElement>) => {
@@ -447,181 +400,145 @@ export default function NotifyPage() {
 
         const file = event.dataTransfer.files?.[0];
         if (file) {
-            await handleFile(file);
+            await handleUpload(file);
         }
-    };
-
-    const onInputFileChange = async (
-        event: React.ChangeEvent<HTMLInputElement>
-    ) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            await handleFile(file);
-        }
-
-        // 같은 파일 재선택 허용
-        event.target.value = "";
     };
 
     const downloadSample = () => {
+        downloadCsvFile(
+            TEMPLATE_HEADERS,
+            [
+                ["홍길동", "hong@example.com", "010-1234-5678", "BTWSoft", "매니저"],
+                ["김철수", "kim@example.com", "010-0000-0000", "Sample Co.", "참가자"],
+            ],
+            `event-${eventId}-notify-sample.csv`
+        );
+    };
+
+    const downloadCurrent = () => {
+        if (!items.length) {
+            setInfo("현재 데이터가 없습니다.");
+            return;
+        }
+
+        downloadCsvFile(
+            [...TEMPLATE_HEADERS, "상태", "발송시각"],
+            items.map((item) => [
+                item.name,
+                item.email ?? "",
+                item.phone ?? "",
+                item.company ?? "",
+                item.role ?? "",
+                getStatusLabel(item.status),
+                item.sentAt ? formatKST(item.sentAt) : "",
+            ]),
+            `event-${eventId}-notify-current.csv`
+        );
+    };
+
+    const clearAll = () => {
+        setItems([]);
+        setWarnings([]);
+        setLastUploadName("");
+        setLastUploadSize(null);
+        setError("");
+        setInfo("알림 발송 대상을 초기화했습니다.");
+
         try {
-            setError("");
-            setInfo("");
-
-            const blob = buildSampleWorkbookBlob();
-            downloadBlob(blob, "participants_sample.xlsx");
+            localStorage.removeItem(storageKey);
         } catch {
-            setError("샘플 파일 생성에 실패했습니다.");
+            // noop
         }
     };
 
-    /* =========================================================
-     * 행사 참여자 -> 발송 대상 추가
-     * ========================================================= */
+    const readyRecipients = items.filter(
+        (item) => item.status === "ready" && item.email && isValidEmail(item.email)
+    );
 
-    const addTargetFromRow = (row: Row) => {
-        if (!emailColumn) {
-            setError("이메일 컬럼을 찾지 못했습니다. (email/이메일/메일 필요)");
-            return;
-        }
+    const selectedRecipients = onlyValidEmail
+        ? filteredItems.filter((item) => item.email && isValidEmail(item.email))
+        : filteredItems;
 
-        const email = (row[emailColumn] ?? "").trim();
-        if (!isEmail(email)) return;
-
-        addTarget({
-            email,
-            name: nameColumn ? (row[nameColumn] ?? "").trim() : "",
-            company: companyColumn ? (row[companyColumn] ?? "").trim() : "",
-            phone: phoneColumn ? (row[phoneColumn] ?? "").trim() : "",
-        });
-    };
-
-    const moveAllValidParticipantsToTargets = () => {
-        if (!emailColumn) {
-            setError("이메일 컬럼을 찾을 수 없습니다. (email/이메일/메일 필요)");
-            return;
-        }
-
-        const existingEmails = new Set<string>(Array.from(targetEmailSet));
-        const nextTargets: Target[] = [];
-
-        validEmailRows.forEach((row) => {
-            const email = (row[emailColumn] ?? "").trim();
-            if (!isEmail(email)) return;
-
-            const emailKey = normalizeEmail(email);
-            if (existingEmails.has(emailKey)) return;
-
-            existingEmails.add(emailKey);
-
-            nextTargets.push({
-                id: uuid(),
-                email,
-                name: nameColumn ? (row[nameColumn] ?? "").trim() : "",
-                company: companyColumn ? (row[companyColumn] ?? "").trim() : "",
-                phone: phoneColumn ? (row[phoneColumn] ?? "").trim() : "",
-            });
-        });
-
-        if (nextTargets.length > 0) {
-            setTargets((prev) => [...nextTargets, ...prev]);
-        }
-
-        setInfo(`유효 이메일 ${nextTargets.length}건을 발송 대상자에 추가했습니다.`);
-    };
-
-    /* =========================================================
-     * 수동 발송 대상 추가
-     * ========================================================= */
-
-    const addManualTarget = () => {
+    const handleMockSend = async () => {
         setError("");
         setInfo("");
 
-        const email = manualEmail.trim();
-        const name = manualName.trim();
-
-        if (!isEmail(email)) {
-            setManualEmailError("이메일 형식이 올바르지 않습니다.");
+        if (!subject.trim()) {
+            setError("메일 제목을 입력해주세요.");
             return;
         }
 
-        if (targetEmailSet.has(normalizeEmail(email))) {
-            setManualEmailError("이미 발송 대상자에 추가된 이메일입니다.");
+        if (!message.trim()) {
+            setError("메일 내용을 입력해주세요.");
             return;
         }
 
-        setTargets((prev) => [
-            {
-                id: uuid(),
-                email,
-                name,
-                company: "",
-                phone: "",
-            },
-            ...prev,
-        ]);
+        if (readyRecipients.length === 0) {
+            setError("발송 가능한 수신자가 없습니다.");
+            return;
+        }
 
-        setManualName("");
-        setManualEmail("");
-        setManualEmailError("");
-        setInfo("수동 발송 대상자가 추가되었습니다.");
-    };
+        setSending(true);
 
-    /* =========================================================
-     * 발송 대상 관리
-     * ========================================================= */
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 600));
 
-    const removeTarget = (id: string) => {
-        setTargets((prev) => prev.filter((target) => target.id !== id));
-    };
+            const readyIds = new Set(readyRecipients.map((item) => item.id));
 
-    const clearTargets = () => {
-        setTargets([]);
-        setInfo("발송 대상자를 모두 비웠습니다.");
-    };
+            setItems((prev) =>
+                prev.map((item) =>
+                    readyIds.has(item.id)
+                        ? {
+                            ...item,
+                            status: "sent",
+                            sentAt: new Date().toISOString(),
+                        }
+                        : item
+                )
+            );
 
-    /* =========================================================
-     * 발송 요청 (개발용)
-     * ========================================================= */
-
-    const requestSend = () => {
-        const emails = targets.map((target) => target.email);
-
-        alert(
-            [
-                "발송 요청 (개발 단계: 실제 발송 X)",
-                `- eventId: ${eventId}`,
-                `- 제목: ${subject}`,
-                `- 대상 수: ${emails.length}`,
-                "",
-                "대상 이메일:",
-                ...emails.map((email) => `- ${email}`),
-                "",
-                "본문:",
-                content,
-            ].join("\n")
-        );
+            setInfo(
+                `프론트 mock 기준으로 ${readyRecipients.length.toLocaleString()}명에게 발송 완료 처리했습니다.`
+            );
+        } catch {
+            setError("발송 처리 중 오류가 발생했습니다.");
+        } finally {
+            setSending(false);
+        }
     };
 
     return (
         <main className="p-6 text-gray-900">
-            {/* 상단 헤더 */}
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-semibold text-black">Notify</h1>
-                    <p className="mt-1 text-sm text-gray-700">eventId: {eventId || "-"}</p>
+                    <p className="mt-1 text-sm text-gray-700">
+                        이벤트 알림 발송 화면입니다. Event ID: {eventId || "-"}
+                    </p>
                 </div>
 
-                <button
-                    onClick={downloadSample}
-                    className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-gray-50"
-                >
-                    샘플 엑셀 다운로드
-                </button>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={downloadSample}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
+                        샘플 다운로드
+                    </button>
+                    <button
+                        onClick={downloadCurrent}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
+                        현재 데이터 다운로드
+                    </button>
+                    <button
+                        onClick={clearAll}
+                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                    >
+                        초기화
+                    </button>
+                </div>
             </div>
 
-            {/* 안내/에러 메시지 */}
             {error ? (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                     {error}
@@ -634,318 +551,332 @@ export default function NotifyPage() {
                 </div>
             ) : null}
 
-            {/* 업로드 / 메일 템플릿 */}
-            <section className="mt-6 grid gap-6 lg:grid-cols-2">
-                {/* 파일 업로드 */}
-                <div className="rounded-2xl border bg-white p-5">
-                    <h2 className="text-lg font-semibold text-black">파일 업로드</h2>
-                    <p className="mt-1 text-sm text-gray-600">
-                        엑셀/CSV 업로드 시 유효 이메일을 발송 대상자에 바로 추가합니다.
-                    </p>
+            {warnings.length > 0 ? (
+                <div className="mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+                    <div className="font-semibold">확인 필요</div>
+                    <ul className="mt-2 list-disc pl-5">
+                        {warnings.map((warning, index) => (
+                            <li key={`${warning}-${index}`}>{warning}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
 
-                    <div
-                        onDragOver={(event) => {
-                            event.preventDefault();
-                            setDragOver(true);
-                        }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={onDrop}
-                        className={[
-                            "mt-4 flex min-h-[180px] flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition",
-                            dragOver ? "border-black bg-gray-50" : "border-gray-300 bg-white",
-                        ].join(" ")}
-                    >
-                        <p className="text-base font-semibold text-black">엑셀/CSV 파일 드래그 업로드</p>
-                        <p className="mt-1 text-sm text-gray-600">.xlsx / .xls / .csv, 최대 2MB</p>
+            <section className="mt-6">
+                <div
+                    onDragOver={(event) => {
+                        event.preventDefault();
+                        setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    className={[
+                        "rounded-2xl border bg-white p-6 transition",
+                        dragOver ? "border-black ring-2 ring-black/10" : "border-gray-200",
+                    ].join(" ")}
+                >
+                    <div className="flex flex-col items-center gap-2 text-center">
+                        <div className="text-base font-semibold text-black">
+                            알림 수신자 파일 업로드
+                        </div>
+                        <div className="text-sm text-gray-700">
+                            .xlsx / .csv 지원, 첫 줄은 헤더입니다.
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            프론트에서는 미리보기/사전검증만 수행하고, 실제 발송은 추후 백엔드에서 처리합니다.
+                        </div>
 
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                        >
-                            파일 선택
-                        </button>
+                        <div className="mt-3 flex gap-2">
+                            <button
+                                onClick={onPickFile}
+                                disabled={uploading}
+                                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                            >
+                                {uploading ? "업로드 처리 중..." : "파일 선택"}
+                            </button>
+                            <button
+                                onClick={downloadSample}
+                                className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                            >
+                                샘플 다운로드
+                            </button>
+                        </div>
 
                         <input
-                            ref={fileInputRef}
+                            ref={inputRef}
                             type="file"
-                            accept={ACCEPT}
+                            accept=".xlsx,.csv"
                             className="hidden"
-                            onChange={onInputFileChange}
+                            onChange={onInputChange}
                         />
-
-                        {fileName ? (
-                            <p className="mt-3 text-sm text-gray-700">업로드 파일: {fileName}</p>
-                        ) : null}
-                    </div>
-                </div>
-
-                {/* 메일 템플릿 */}
-                <div className="rounded-2xl border bg-white p-5">
-                    <h2 className="text-lg font-semibold text-black">메일 템플릿</h2>
-
-                    <label className="mt-4 block text-sm font-medium text-gray-700">제목</label>
-                    <input
-                        value={subject}
-                        onChange={(event) => setSubject(event.target.value)}
-                        className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                    />
-
-                    <label className="mt-4 block text-sm font-medium text-gray-700">내용</label>
-                    <textarea
-                        value={content}
-                        onChange={(event) => setContent(event.target.value)}
-                        className="mt-1 h-44 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                    />
-
-                    <button
-                        disabled={targets.length === 0}
-                        onClick={requestSend}
-                        className={`mt-6 w-full rounded-lg px-4 py-2 text-sm font-medium ${
-                            targets.length === 0 ? "bg-gray-200 text-gray-500" : "bg-black text-white"
-                        }`}
-                    >
-                        발송 요청
-                    </button>
-
-                    <div className="mt-3 text-xs text-gray-500">
-                        개발 단계에서는 실제 발송 대신 대상 이메일 목록만 표시합니다.
                     </div>
                 </div>
             </section>
 
-            {/* 수동 발송 대상 추가 */}
-            <section className="mt-6 rounded-2xl border bg-white p-5">
-                <div>
-                    <h2 className="text-lg font-semibold text-black">수동 발송 대상 추가</h2>
-                    <p className="mt-1 text-sm text-gray-600">
-                        이메일을 직접 입력해서 발송 대상자에 추가합니다.
-                    </p>
+            <section className="mt-6 grid gap-4 md:grid-cols-4">
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">전체 대상 수</div>
+                    <div className="mt-2 text-2xl font-semibold text-black">
+                        {stats.total.toLocaleString()} 명
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">이벤트 기준 local mock</div>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">발송 가능</div>
+                    <div className="mt-2 text-2xl font-semibold text-black">
+                        {stats.validEmailCount.toLocaleString()} 명
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">유효한 이메일 기준</div>
+                </div>
+
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">발송 상태</div>
+                    <div className="mt-2 text-sm text-gray-800">
+                        대기 {stats.ready} / 완료 {stats.sent} / 실패 {stats.failed}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">초안은 별도 확인 필요</div>
+                </div>
+
+                <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm font-medium text-gray-700">최근 업로드</div>
+                    {lastUploadName ? (
+                        <div className="mt-2 space-y-1 text-xs text-gray-600">
+                            <div className="truncate">{lastUploadName}</div>
+                            <div>{lastUploadSizeText} bytes</div>
+                        </div>
+                    ) : (
+                        <div className="mt-2 text-xs text-gray-500">
+                            아직 업로드 이력이 없습니다.
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            <section className="mt-6 rounded-2xl border bg-white p-5">
+                <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                        <label className="text-sm font-medium text-gray-700">이름(선택)</label>
+                        <label className="text-sm font-medium text-gray-700">메일 제목</label>
                         <input
-                            value={manualName}
-                            onChange={(event) => setManualName(event.target.value)}
+                            value={subject}
+                            onChange={(event) => setSubject(event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="메일 제목을 입력하세요"
+                        />
+                    </div>
+
+                    <div className="flex items-end">
+                        <div
+                            className="w-full rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                            실제 SMTP/API 연동 전 단계입니다. 지금은 프론트에서 발송 가능 대상 선별과 mock 발송 상태만 처리합니다.
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-4">
+                    <label className="text-sm font-medium text-gray-700">메일 내용</label>
+                    <textarea
+                        value={message}
+                        onChange={(event) => setMessage(event.target.value)}
+                        rows={8}
+                        className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                        placeholder="메일 내용을 입력하세요"
+                    />
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                        onClick={handleMockSend}
+                        disabled={sending}
+                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                        {sending ? "발송 처리 중..." : "발송 실행(mock)"}
+                    </button>
+
+                    <label className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-700">
+                        <input
+                            type="checkbox"
+                            checked={onlyValidEmail}
+                            onChange={(event) => setOnlyValidEmail(event.target.checked)}
+                        />
+                        유효한 이메일만 보기
+                    </label>
+                </div>
+            </section>
+
+            <section className="mt-6 rounded-2xl border bg-white p-5">
+                <div className="grid gap-4 md:grid-cols-5">
+                    <div>
+                        <label className="text-sm font-medium text-gray-700">이름 *</label>
+                        <input
+                            value={name}
+                            onChange={(event) => setName(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="홍길동"
                         />
                     </div>
 
-                    <div className="md:col-span-2">
-                        <label className="text-sm font-medium text-gray-700">이메일 *</label>
-
-                        <div className="mt-1 flex flex-col gap-2 md:flex-row">
-                            <div className="flex-1">
-                                <input
-                                    value={manualEmail}
-                                    onChange={(event) => {
-                                        const value = event.target.value;
-                                        setManualEmail(value);
-
-                                        const trimmed = value.trim();
-
-                                        if (trimmed.length === 0) {
-                                            setManualEmailError("");
-                                            return;
-                                        }
-
-                                        if (!isEmail(trimmed)) {
-                                            setManualEmailError("이메일 형식이 올바르지 않습니다.");
-                                            return;
-                                        }
-
-                                        if (targetEmailSet.has(normalizeEmail(trimmed))) {
-                                            setManualEmailError("이미 발송 대상자에 추가된 이메일입니다.");
-                                            return;
-                                        }
-
-                                        setManualEmailError("");
-                                    }}
-                                    className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10 ${
-                                        manualEmailError ? "border-red-500" : ""
-                                    }`}
-                                    placeholder="hong@example.com"
-                                />
-
-                                {manualEmailError ? (
-                                    <p className="mt-1 text-xs text-red-600">{manualEmailError}</p>
-                                ) : null}
-                            </div>
-
-                            <button
-                                onClick={addManualTarget}
-                                disabled={manualEmail.trim().length === 0 || manualEmailError.length > 0}
-                                className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium ${
-                                    manualEmail.trim().length === 0 || manualEmailError.length > 0
-                                        ? "bg-gray-200 text-gray-500"
-                                        : "bg-black text-white"
-                                }`}
-                            >
-                                추가
-                            </button>
-                        </div>
+                    <div>
+                        <label className="text-sm font-medium text-gray-700">이메일</label>
+                        <input
+                            value={email}
+                            onChange={(event) => setEmail(event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="hong@example.com"
+                        />
                     </div>
+
+                    <div>
+                        <label className="text-sm font-medium text-gray-700">전화번호</label>
+                        <input
+                            value={phone}
+                            onChange={(event) => setPhone(formatPhoneKR(event.target.value))}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="010-1234-5678"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium text-gray-700">회사</label>
+                        <input
+                            value={company}
+                            onChange={(event) => setCompany(event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="BTWSoft"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium text-gray-700">직함/역할</label>
+                        <input
+                            value={role}
+                            onChange={(event) => setRole(event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="매니저"
+                        />
+                    </div>
+                </div>
+
+                <div className="mt-4">
+                    <button
+                        onClick={handleAdd}
+                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                    >
+                        수신자 추가
+                    </button>
                 </div>
             </section>
 
-            {/* 발송 대상자 목록 */}
-            <section className="mt-6 rounded-2xl border bg-white p-5">
-                <div className="flex flex-wrap items-end justify-between gap-3">
+            <section className="mt-6 rounded-2xl border bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
                     <div>
-                        <h2 className="text-lg font-semibold text-black">발송 대상자</h2>
+                        <h2 className="text-lg font-semibold text-black">알림 수신자 목록</h2>
                         <p className="mt-1 text-sm text-gray-600">
-                            업로드, 행사 참여자 추가, 수동 입력으로 모은 최종 발송 목록입니다.
+                            업로드/수동 등록된 알림 수신자와 발송 상태를 확인합니다.
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2 text-sm">
-                        <span className="rounded-full border bg-white px-3 py-1">총 {targets.length}명</span>
-                        <button
-                            onClick={clearTargets}
-                            disabled={targets.length === 0}
-                            className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+                    <div className="flex flex-wrap gap-2">
+                        <input
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            className="w-full min-w-[220px] max-w-xs rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            placeholder="이름, 이메일, 회사 검색"
+                        />
+                        <select
+                            value={statusFilter}
+                            onChange={(event) =>
+                                setStatusFilter(event.target.value as "all" | RecipientStatus)
+                            }
+                            className="rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                         >
-                            전체 비우기
-                        </button>
+                            <option value="all">전체 상태</option>
+                            <option value="draft">초안</option>
+                            <option value="ready">발송대기</option>
+                            <option value="sent">발송완료</option>
+                            <option value="failed">실패</option>
+                        </select>
                     </div>
                 </div>
 
-                {targets.length === 0 ? (
-                    <p className="mt-4 text-sm text-gray-600">발송 대상자가 없습니다.</p>
+                <div className="border-b bg-gray-50/60 px-4 py-3 text-xs text-gray-600">
+                    현재 필터 기준 대상: {selectedRecipients.length.toLocaleString()}명 / 즉시 발송 가능:
+                    {" "}
+                    {readyRecipients.length.toLocaleString()}명
+                </div>
+
+                {filteredItems.length === 0 ? (
+                    <div className="p-6 text-sm text-gray-600">표시할 수신자가 없습니다.</div>
                 ) : (
-                    <div className="mt-4 overflow-x-auto rounded-xl border">
-                        <table className="min-w-[720px] w-full text-sm">
-                            <thead className="bg-gray-50">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
+                            <thead className="bg-gray-50 text-gray-700">
                             <tr>
-                                <th className="border-b px-3 py-2 text-left font-semibold">이름</th>
-                                <th className="border-b px-3 py-2 text-left font-semibold">이메일</th>
-                                <th className="border-b px-3 py-2 text-left font-semibold">회사</th>
-                                <th className="border-b px-3 py-2 text-left font-semibold">전화</th>
-                                <th className="border-b px-3 py-2 text-left font-semibold">관리</th>
+                                <th className="border-b px-4 py-3 font-semibold">이름</th>
+                                <th className="border-b px-4 py-3 font-semibold">이메일</th>
+                                <th className="border-b px-4 py-3 font-semibold">전화번호</th>
+                                <th className="border-b px-4 py-3 font-semibold">회사</th>
+                                <th className="border-b px-4 py-3 font-semibold">직함/역할</th>
+                                <th className="border-b px-4 py-3 font-semibold">상태</th>
+                                <th className="border-b px-4 py-3 font-semibold">발송시각</th>
+                                <th className="border-b px-4 py-3 font-semibold">등록일시</th>
+                                <th className="border-b px-4 py-3 font-semibold">관리</th>
                             </tr>
                             </thead>
                             <tbody>
-                            {targets.map((target) => (
-                                <tr key={target.id} className="odd:bg-white even:bg-gray-50">
-                                    <td className="border-b px-3 py-2">{target.name ?? ""}</td>
-                                    <td className="border-b px-3 py-2">{target.email}</td>
-                                    <td className="border-b px-3 py-2">{target.company ?? ""}</td>
-                                    <td className="border-b px-3 py-2">{target.phone ?? ""}</td>
-                                    <td className="border-b px-3 py-2">
-                                        <button
-                                            onClick={() => removeTarget(target.id)}
-                                            className="rounded-lg border px-3 py-1 text-xs hover:bg-gray-50"
+                            {filteredItems.map((item) => (
+                                <tr key={item.id} className="odd:bg-white even:bg-gray-50/50">
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.name}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.email || "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.phone || "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.company || "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">{item.role || "-"}</td>
+                                    <td className="border-b px-4 py-3 text-gray-900">
+                                        <div
+                                            className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${getStatusBadgeClass(
+                                                item.status
+                                            )}`}
                                         >
-                                            제거
-                                        </button>
+                                            {getStatusLabel(item.status)}
+                                        </div>
+                                    </td>
+                                    <td className="border-b px-4 py-3 text-gray-900">
+                                        {formatKST(item.sentAt)}
+                                    </td>
+                                    <td className="border-b px-4 py-3 text-gray-900">
+                                        {formatKST(item.createdAt)}
+                                    </td>
+                                    <td className="border-b px-4 py-3 text-gray-900">
+                                        <div className="flex flex-wrap gap-2">
+                                            <select
+                                                value={item.status}
+                                                onChange={(event) =>
+                                                    handleStatusChange(
+                                                        item.id,
+                                                        event.target.value as RecipientStatus
+                                                    )
+                                                }
+                                                className="rounded-lg border bg-white px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-black/10"
+                                            >
+                                                <option value="draft">초안</option>
+                                                <option value="ready">발송대기</option>
+                                                <option value="sent">발송완료</option>
+                                                <option value="failed">실패</option>
+                                            </select>
+
+                                            <button
+                                                onClick={() => handleDelete(item.id)}
+                                                className="rounded-lg border px-3 py-1 text-xs hover:bg-gray-50"
+                                            >
+                                                삭제
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
                             </tbody>
                         </table>
                     </div>
-                )}
-            </section>
-
-            {/* 행사 참여자 목록 */}
-            <section className="mt-6 rounded-2xl border bg-white p-5">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h2 className="text-lg font-semibold text-black">행사 참여자</h2>
-                        <p className="mt-1 text-sm text-gray-600">
-                            현재는 mock 데이터입니다. 이후 실제 API 연동으로 교체하면 됩니다.
-                        </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="rounded-full border bg-white px-3 py-1">
-              원본 {rows.length}행
-            </span>
-                        <span className="rounded-full border bg-white px-3 py-1">
-              유효 이메일 {validEmailRows.length}개
-            </span>
-
-                        <button
-                            onClick={moveAllValidParticipantsToTargets}
-                            disabled={validEmailRows.length === 0}
-                            className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:bg-gray-200 disabled:text-gray-500"
-                        >
-                            유효 이메일 전체 추가
-                        </button>
-                    </div>
-                </div>
-
-                {!emailColumn ? (
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                        이메일 컬럼을 찾지 못했습니다. 헤더에 email / 이메일 / 메일 중 하나가 필요합니다.
-                    </div>
-                ) : null}
-
-                {rows.length === 0 ? (
-                    <p className="mt-4 text-sm text-gray-600">데이터가 없습니다.</p>
-                ) : (
-                    <>
-                        <div className="mt-4 overflow-x-auto rounded-xl border">
-                            <table className="min-w-[760px] w-full text-sm">
-                                <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="w-[110px] border-b px-2 py-2 text-left font-semibold">
-                                        추가
-                                    </th>
-                                    {headers.map((header) => (
-                                        <th
-                                            key={header}
-                                            className="border-b px-2 py-2 text-left font-semibold"
-                                        >
-                                            {header}
-                                        </th>
-                                    ))}
-                                </tr>
-                                </thead>
-                                <tbody>
-                                {previewRows.map((row, index) => {
-                                    const email = emailColumn ? row[emailColumn] ?? "" : "";
-                                    const canAdd = emailColumn ? isEmail(email) : false;
-                                    const alreadyAdded = canAdd
-                                        ? targetEmailSet.has(normalizeEmail(email))
-                                        : false;
-
-                                    return (
-                                        <tr key={`${index}-${email}`} className="odd:bg-white even:bg-gray-50">
-                                            <td className="border-b px-2 py-2">
-                                                <button
-                                                    onClick={() => addTargetFromRow(row)}
-                                                    disabled={!canAdd || alreadyAdded}
-                                                    className={`rounded-lg px-3 py-1 text-xs font-medium ${
-                                                        !canAdd || alreadyAdded
-                                                            ? "bg-gray-200 text-gray-500"
-                                                            : "bg-black text-white"
-                                                    }`}
-                                                >
-                                                    {alreadyAdded ? "추가됨" : "추가"}
-                                                </button>
-                                            </td>
-
-                                            {headers.map((header) => (
-                                                <td key={header} className="border-b px-2 py-2">
-                                                    {row[header] ?? ""}
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    );
-                                })}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {rows.length > MAX_PREVIEW_ROWS ? (
-                            <div className="mt-2 text-xs text-gray-500">
-                                미리보기는 최대 {MAX_PREVIEW_ROWS}행까지만 표시됩니다.
-                            </div>
-                        ) : null}
-                    </>
                 )}
             </section>
         </main>
