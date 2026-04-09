@@ -28,7 +28,7 @@ const DEFAULT_SUBJECT = "[행사 안내] 참가 관련 안내드립니다.";
 const DEFAULT_MESSAGE = `안녕하세요.
 
 행사 참가 관련 안내드립니다.
-본 메일은 행사 운영 시스템에서 발송되는 예시 화면입니다.
+본 메일은 행사 시스템에서 발송되는 예시 화면입니다.
 
 감사합니다.`;
 
@@ -518,22 +518,16 @@ export default function EventNotifyPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={downloadSample}
-                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                    >
+                    <button onClick={downloadSample}
+                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                         샘플 다운로드
                     </button>
-                    <button
-                        onClick={downloadCurrent}
-                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                    >
+                    <button onClick={downloadCurrent}
+                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                         현재 데이터 다운로드
                     </button>
-                    <button
-                        onClick={clearAll}
-                        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                    >
+                    <button onClick={clearAll}
+                            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                         초기화
                     </button>
                 </div>
@@ -587,28 +581,22 @@ export default function EventNotifyPage() {
                         </div>
 
                         <div className="mt-3 flex gap-2">
-                            <button
-                                onClick={onPickFile}
-                                disabled={uploading}
-                                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-                            >
+                            <button onClick={onPickFile}
+                                    disabled={uploading}
+                                    className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
                                 {uploading ? "업로드 처리 중..." : "파일 선택"}
                             </button>
-                            <button
-                                onClick={downloadSample}
-                                className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                            >
+                            <button onClick={downloadSample}
+                                    className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50">
                                 샘플 다운로드
                             </button>
                         </div>
 
-                        <input
-                            ref={inputRef}
-                            type="file"
-                            accept=".xlsx,.csv"
-                            className="hidden"
-                            onChange={onInputChange}
-                        />
+                        <input type="file"
+                               ref={inputRef}
+                               accept=".xlsx,.csv"
+                               className="hidden"
+                               onChange={onInputChange}/>
                     </div>
                 </div>
             </section>
@@ -658,9 +646,9 @@ export default function EventNotifyPage() {
                     <div>
                         <label className="text-sm font-medium text-gray-700">메일 제목</label>
                         <input
-                            value={subject}
                             onChange={(event) => setSubject(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                            value={subject}
                             placeholder="메일 제목을 입력하세요"
                         />
                     </div>
@@ -676,29 +664,25 @@ export default function EventNotifyPage() {
                 <div className="mt-4">
                     <label className="text-sm font-medium text-gray-700">메일 내용</label>
                     <textarea
-                        value={message}
                         onChange={(event) => setMessage(event.target.value)}
-                        rows={8}
                         className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+                        rows={8}
                         placeholder="메일 내용을 입력하세요"
+                        value={message}
                     />
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                        onClick={handleMockSend}
-                        disabled={sending}
-                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-                    >
+                    <button onClick={handleMockSend}
+                            disabled={sending}
+                            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
                         {sending ? "발송 처리 중..." : "발송 실행(mock)"}
                     </button>
 
                     <label className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-700">
-                        <input
-                            type="checkbox"
-                            checked={onlyValidEmail}
-                            onChange={(event) => setOnlyValidEmail(event.target.checked)}
-                        />
+                        <input type="checkbox"
+                               checked={onlyValidEmail}
+                               onChange={(event) => setOnlyValidEmail(event.target.checked)}/>
                         유효한 이메일만 보기
                     </label>
                 </div>
@@ -709,10 +693,10 @@ export default function EventNotifyPage() {
                     <div>
                         <label className="text-sm font-medium text-gray-700">이름 *</label>
                         <input
-                            value={name}
                             onChange={(event) => setName(event.target.value)}
                             className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
                             placeholder="홍길동"
+                            value={name}
                         />
                     </div>
 
@@ -758,10 +742,8 @@ export default function EventNotifyPage() {
                 </div>
 
                 <div className="mt-4">
-                    <button
-                        onClick={handleAdd}
-                        className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                    >
+                    <button className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                            onClick={handleAdd}>
                         수신자 추가
                     </button>
                 </div>
@@ -849,25 +831,22 @@ export default function EventNotifyPage() {
                                     <td className="border-b px-4 py-3 text-gray-900">
                                         <div className="flex flex-wrap gap-2">
                                             <select
+                                                className="rounded-lg border bg-white px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-black/10"
                                                 value={item.status}
                                                 onChange={(event) =>
                                                     handleStatusChange(
                                                         item.id,
                                                         event.target.value as RecipientStatus
                                                     )
-                                                }
-                                                className="rounded-lg border bg-white px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-black/10"
-                                            >
+                                                }>
                                                 <option value="draft">초안</option>
                                                 <option value="ready">발송대기</option>
                                                 <option value="sent">발송완료</option>
                                                 <option value="failed">실패</option>
                                             </select>
 
-                                            <button
-                                                onClick={() => handleDelete(item.id)}
-                                                className="rounded-lg border px-3 py-1 text-xs hover:bg-gray-50"
-                                            >
+                                            <button className="rounded-lg border px-3 py-1 text-xs hover:bg-gray-50"
+                                                    onClick={() => handleDelete(item.id)}>
                                                 삭제
                                             </button>
                                         </div>
