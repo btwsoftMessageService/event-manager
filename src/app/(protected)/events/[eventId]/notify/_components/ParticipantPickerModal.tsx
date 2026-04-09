@@ -13,6 +13,14 @@ type DbParticipant = {
     phone?: string;
 };
 
+type RawParticipant = {
+    id?: unknown;
+    name?: unknown;
+    email?: unknown;
+    company?: unknown;
+    phone?: unknown;
+};
+
 const GLOBAL_PARTICIPANTS_STORAGE_KEY = "event-manager:global-participants:v1";
 
 function normalizeEmailKey(v: string) {
@@ -23,26 +31,35 @@ function normalizePhoneKey(v: string) {
     return v.replace(/[^\d]/g, "").trim();
 }
 
-/**
- * (프로토타입) DB 참여자 로드
- * - TODO: 실제 DB 붙이면 여기만 API로 교체
- */
+function getErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+
+    return fallback;
+}
+
+function toDbParticipant(value: RawParticipant): DbParticipant {
+    return {
+        id: String(value.id ?? ""),
+        name: String(value.name ?? ""),
+        email: value.email ? String(value.email) : undefined,
+        company: value.company ? String(value.company) : undefined,
+        phone: value.phone ? String(value.phone) : undefined,
+    };
+}
+
 async function loadDbParticipants(): Promise<DbParticipant[]> {
     try {
         const raw = localStorage.getItem(GLOBAL_PARTICIPANTS_STORAGE_KEY);
         if (!raw) return [];
-        const parsed = JSON.parse(raw);
+
+        const parsed: unknown = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
 
         return parsed
-            .map((p: any) => ({
-                id: String(p?.id ?? ""),
-                name: String(p?.name ?? ""),
-                email: p?.email ? String(p.email) : undefined,
-                company: p?.company ? String(p.company) : undefined,
-                phone: p?.phone ? String(p.phone) : undefined,
-            }))
-            .filter((p: DbParticipant) => p.name.trim().length > 0);
+            .map((item) => toDbParticipant((item ?? {}) as RawParticipant))
+            .filter((participant) => participant.name.trim().length > 0);
     } catch {
         return [];
     }
@@ -52,22 +69,25 @@ async function loadDbParticipants(): Promise<DbParticipant[]> {
 function makeKey(r: Row) {
     const email = (r["email"] ?? "").trim();
     if (email) return `email:${normalizeEmailKey(email)}`;
+
     const name = (r["name"] ?? "").trim().toLowerCase();
     const phone = normalizePhoneKey(r["phone"] ?? "");
     return `name:${name}|phone:${phone}`;
 }
+
+type ParticipantPickerModalProps = {
+    open: boolean;
+    onClose: () => void;
+    existingRows: Row[];
+    onAddRows: (rowsToAdd: Row[]) => void;
+};
 
 export default function ParticipantPickerModal({
                                                    open,
                                                    onClose,
                                                    existingRows,
                                                    onAddRows,
-                                               }: {
-    open: boolean;
-    onClose: () => void;
-    existingRows: Row[];
-    onAddRows: (rowsToAdd: Row[]) => void;
-}) {
+                                               }: ParticipantPickerModalProps) {
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState<string>("");
 
@@ -75,20 +95,20 @@ export default function ParticipantPickerModal({
     const [q, setQ] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-    // 모달 열릴 때 로드
     useEffect(() => {
         if (!open) return;
 
-        (async () => {
+        void (async () => {
             setLoading(true);
             setErr("");
+
             try {
                 const list = await loadDbParticipants();
                 setDbParticipants(list);
                 setSelectedIds(new Set());
                 setQ("");
-            } catch (e: any) {
-                setErr(e?.message ?? "참여자 목록을 불러오지 못했습니다.");
+            } catch (error: unknown) {
+                setErr(getErrorMessage(error, "참여자 목록을 불러오지 못했습니다."));
             } finally {
                 setLoading(false);
             }
@@ -96,19 +116,25 @@ export default function ParticipantPickerModal({
     }, [open]);
 
     const filtered = useMemo(() => {
-        const k = q.trim().toLowerCase();
-        if (!k) return dbParticipants;
-        return dbParticipants.filter((p) => {
-            const hay = `${p.name} ${p.email ?? ""} ${p.company ?? ""} ${p.phone ?? ""}`.toLowerCase();
-            return hay.includes(k);
+        const keyword = q.trim().toLowerCase();
+        if (!keyword) return dbParticipants;
+
+        return dbParticipants.filter((participant) => {
+            const haystack =
+                `${participant.name} ${participant.email ?? ""} ${participant.company ?? ""} ${participant.phone ?? ""}`.toLowerCase();
+
+            return haystack.includes(keyword);
         });
     }, [dbParticipants, q]);
 
     const toggleSelect = (id: string) => {
         setSelectedIds((prev) => {
             const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
             return next;
         });
     };
@@ -116,38 +142,42 @@ export default function ParticipantPickerModal({
     const selectAllFiltered = () => {
         setSelectedIds((prev) => {
             const next = new Set(prev);
-            for (const p of filtered) next.add(p.id);
+            for (const participant of filtered) {
+                next.add(participant.id);
+            }
             return next;
         });
     };
 
-    const clearSelected = () => setSelectedIds(new Set());
+    const clearSelected = () => {
+        setSelectedIds(new Set());
+    };
 
     const addSelected = () => {
-        const picked = dbParticipants.filter((p) => selectedIds.has(p.id));
+        const picked = dbParticipants.filter((participant) => selectedIds.has(participant.id));
         if (picked.length === 0) return;
 
-        const mapped: Row[] = picked.map((p) => ({
-            name: p.name ?? "",
-            email: p.email ?? "",
-            company: p.company ?? "",
-            phone: p.phone ?? "",
+        const mapped: Row[] = picked.map((participant) => ({
+            name: participant.name ?? "",
+            email: participant.email ?? "",
+            company: participant.company ?? "",
+            phone: participant.phone ?? "",
         }));
 
-        // 기존 + 신규 merge 후 dedup → 그중 "신규"만 page로 넘김
         const existingKeys = new Set(existingRows.map(makeKey));
         const merged = [...existingRows, ...mapped];
 
         const seen = new Set<string>();
         const dedup: Row[] = [];
-        for (const r of merged) {
-            const key = makeKey(r);
+
+        for (const row of merged) {
+            const key = makeKey(row);
             if (seen.has(key)) continue;
             seen.add(key);
-            dedup.push(r);
+            dedup.push(row);
         }
 
-        const toAdd = dedup.filter((r) => !existingKeys.has(makeKey(r)));
+        const toAdd = dedup.filter((row) => !existingKeys.has(makeKey(row)));
 
         onAddRows(toAdd);
         onClose();
@@ -179,30 +209,23 @@ export default function ParticipantPickerModal({
                                 value={q}
                                 onChange={(e) => setQ(e.target.value)}
                                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-                                placeholder="이름 / 이메일 / 회사 / 전화"
-                            />
+                                placeholder="이름 / 이메일 / 회사 / 전화"/>
                         </div>
 
                         <div className="flex flex-wrap gap-2">
-                            <button
-                                onClick={selectAllFiltered}
-                                disabled={loading || filtered.length === 0}
-                                className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
-                            >
+                            <button onClick={selectAllFiltered}
+                                    disabled={loading || filtered.length === 0}
+                                    className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50">
                                 검색결과 전체선택
                             </button>
-                            <button
-                                onClick={clearSelected}
-                                disabled={selectedIds.size === 0}
-                                className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
-                            >
+                            <button onClick={clearSelected}
+                                    disabled={selectedIds.size === 0}
+                                    className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50">
                                 선택해제
                             </button>
-                            <button
-                                onClick={addSelected}
-                                disabled={selectedIds.size === 0}
-                                className="rounded-lg bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
-                            >
+                            <button onClick={addSelected}
+                                    disabled={selectedIds.size === 0}
+                                    className="rounded-lg bg-black px-3 py-2 text-sm text-white disabled:opacity-50">
                                 선택 추가 ({selectedIds.size})
                             </button>
                         </div>
@@ -240,18 +263,29 @@ export default function ParticipantPickerModal({
                                     </td>
                                 </tr>
                             ) : (
-                                filtered.map((p) => {
-                                    const checked = selectedIds.has(p.id);
+                                filtered.map((participant) => {
+                                    const checked = selectedIds.has(participant.id);
+
                                     return (
-                                        <tr key={p.id} className="odd:bg-white even:bg-gray-50/50">
+                                        <tr className="odd:bg-white even:bg-gray-50/50"
+                                            key={participant.id}>
                                             <td className="border-b px-3 py-2">
-                                                <input type="checkbox" checked={checked}
-                                                       onChange={() => toggleSelect(p.id)}/>
+                                                <input type="checkbox"
+                                                       checked={checked}
+                                                       onChange={() => toggleSelect(participant.id)}/>
                                             </td>
-                                            <td className="border-b px-3 py-2 font-medium text-gray-900">{p.name}</td>
-                                            <td className="border-b px-3 py-2 text-gray-900">{p.email ?? ""}</td>
-                                            <td className="border-b px-3 py-2 text-gray-900">{p.company ?? ""}</td>
-                                            <td className="border-b px-3 py-2 text-gray-900">{p.phone ?? ""}</td>
+                                            <td className="border-b px-3 py-2 font-medium text-gray-900">
+                                                {participant.name}
+                                            </td>
+                                            <td className="border-b px-3 py-2 text-gray-900">
+                                                {participant.email ?? ""}
+                                            </td>
+                                            <td className="border-b px-3 py-2 text-gray-900">
+                                                {participant.company ?? ""}
+                                            </td>
+                                            <td className="border-b px-3 py-2 text-gray-900">
+                                                {participant.phone ?? ""}
+                                            </td>
                                         </tr>
                                     );
                                 })
@@ -260,7 +294,9 @@ export default function ParticipantPickerModal({
                         </table>
                     </div>
 
-                    <div className="mt-3 text-xs text-gray-500">* 중복 제거 기준: email 우선, 없으면 name+phone</div>
+                    <div className="mt-3 text-xs text-gray-500">
+                        * 중복 제거 기준: email 우선, 없으면 name+phone
+                    </div>
                 </div>
             </div>
         </div>

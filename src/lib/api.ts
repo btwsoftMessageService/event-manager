@@ -4,6 +4,28 @@ export type ApiResult<T> =
     | { ok: true; data: T }
     | { ok: false; message: string; status?: number };
 
+type ApiErrorBody = {
+    message?: string;
+};
+
+function getErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+
+    return fallback;
+}
+
+function parseApiErrorBody(text: string): ApiErrorBody | null {
+    if (!text) return null;
+
+    try {
+        return JSON.parse(text) as ApiErrorBody;
+    } catch {
+        return null;
+    }
+}
+
 export async function postJson<T>(
     url: string,
     body: unknown,
@@ -18,7 +40,7 @@ export async function postJson<T>(
         });
 
         const text = await res.text();
-        const json = text ? JSON.parse(text) : null;
+        const json = parseApiErrorBody(text);
 
         if (!res.ok) {
             return {
@@ -28,8 +50,14 @@ export async function postJson<T>(
             };
         }
 
-        return {ok: true, data: json as T};
-    } catch (e: any) {
-        return {ok: false, message: e?.message ?? "Network error"};
+        return {
+            ok: true,
+            data: (text ? JSON.parse(text) : null) as T,
+        };
+    } catch (error: unknown) {
+        return {
+            ok: false,
+            message: getErrorMessage(error, "Network error"),
+        };
     }
 }
